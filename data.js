@@ -166,7 +166,7 @@
       description: "場にいる全ポケモンの能力ランクを0に戻す。",
     }),
     move("toxic-spikes", "どくびし", "poison", "status", null, null, 20, {
-      generation: 4, target: "opponentSide", effect: { kind: "entryHazard", hazard: "toxicSpikes", maxLayers: 2 },
+      generation: 4, target: "opponentSide", reflectable: true, effect: { kind: "entryHazard", hazard: "toxicSpikes", maxLayers: 2 },
       description: "相手の場にどくびしを設置する。2回まで重ねられる。",
     }),
     move("rain-dance", "あまごい", "water", "status", null, null, 5, {
@@ -291,7 +291,7 @@
       description: "100%の確率で相手をまひ状態にする。",
     }),
     move("stealth-rock", "ステルスロック", "rock", "status", null, null, 20, {
-      generation: 4, target: "opponentSide", effect: { kind: "entryHazard", hazard: "stealthRock", baseMaxHpRatio: 0.125, typeScaled: true },
+      generation: 4, target: "opponentSide", reflectable: true, effect: { kind: "entryHazard", hazard: "stealthRock", baseMaxHpRatio: 0.125, typeScaled: true },
       description: "相手の場に、交代時いわ相性に応じてダメージを与える岩を設置する。",
     }),
     move("thunder-wave", "でんじは", "electric", "status", null, 90, 20, {
@@ -448,7 +448,7 @@
       description: "100%の確率で相手の素早さを1段階下げる。",
     }),
     move("sticky-web", "ねばねばネット", "bug", "status", null, null, 20, {
-      generation: 6, target: "opponentSide", effect: { kind: "entryHazard", hazard: "stickyWeb", groundedSwitchInStages: { speed: -1 } },
+      generation: 6, target: "opponentSide", reflectable: true, effect: { kind: "entryHazard", hazard: "stickyWeb", groundedSwitchInStages: { speed: -1 } },
       description: "相手の場に、接地した交代先の素早さを1段階下げる網を設置する。",
     }),
     move("electroweb", "エレキネット", "electric", "special", 55, 95, 15, {
@@ -536,8 +536,25 @@
   const POKEMON = indexBy(POKEMON_LIST, "id");
   const POKEMON_BY_NAME = indexBy(POKEMON_LIST, "name");
 
+  const FLING_POWER_OVERRIDES = Object.freeze({
+    "heat-rock": 60, "life-orb": 30, "kings-rock": 30, "hard-stone": 100,
+    "miracle-seed": 30, "iron-ball": 130, "black-glasses": 30, "black-belt": 30,
+    "terrain-extender": 60, "rocky-helmet": 60, "damp-rock": 60, "binding-band": 30,
+    "mystic-water": 30, magnet: 30, "sharp-beak": 50, "quick-claw": 80,
+    "eject-button": 30, "icy-rock": 40, "never-melt-ice": 30, "poison-barb": 70,
+    "normal-gem": null, "spell-tag": 30, "light-clay": 30, "scope-lens": 30,
+    "twisted-spoon": 30, "metal-coat": 30, metronome: 30, charcoal: 30,
+    "fairy-feather": null, "dragon-fang": 70,
+  });
+
   function item(id, name, category, trigger, effect, description, consumable = false) {
-    return deepFreeze({ id, name, category, trigger, consumable, effect, description });
+    const flingPower = Object.hasOwn(FLING_POWER_OVERRIDES, id) ? FLING_POWER_OVERRIDES[id] : 10;
+    const flingEffect = id === "kings-rock" ? { kind: "flinch" }
+      : id === "poison-barb" ? { kind: "status", status: "poison" }
+        : category.endsWith("Berry") || category === "resistBerry" ? { kind: "activateItemOnTarget" }
+          : ["white-herb", "mental-herb"].includes(id) ? { kind: "activateItemOnTarget" }
+            : null;
+    return deepFreeze({ id, name, category, trigger, consumable, flingPower, flingEffect, effect, description });
   }
 
   function typeBoostItem(id, name, typeId, description) {
@@ -733,6 +750,92 @@
   const ITEMS = indexBy(ITEM_LIST, "id");
   const ITEMS_BY_NAME = indexBy(ITEM_LIST, "name");
 
+  // Only non-neutral matchups are listed. Missing pairs have a multiplier of 1.
+  const TYPE_CHART = deepFreeze({
+    normal: { rock: 0.5, ghost: 0, steel: 0.5 },
+    fire: { fire: 0.5, water: 0.5, grass: 2, ice: 2, bug: 2, rock: 0.5, dragon: 0.5, steel: 2 },
+    water: { fire: 2, water: 0.5, grass: 0.5, ground: 2, rock: 2, dragon: 0.5 },
+    electric: { water: 2, electric: 0.5, grass: 0.5, ground: 0, flying: 2, dragon: 0.5 },
+    grass: { fire: 0.5, water: 2, grass: 0.5, poison: 0.5, ground: 2, flying: 0.5, bug: 0.5, rock: 2, dragon: 0.5, steel: 0.5 },
+    ice: { fire: 0.5, water: 0.5, grass: 2, ice: 0.5, ground: 2, flying: 2, dragon: 2, steel: 0.5 },
+    fighting: { normal: 2, ice: 2, poison: 0.5, flying: 0.5, psychic: 0.5, bug: 0.5, rock: 2, ghost: 0, dark: 2, steel: 2, fairy: 0.5 },
+    poison: { grass: 2, poison: 0.5, ground: 0.5, rock: 0.5, ghost: 0.5, steel: 0, fairy: 2 },
+    ground: { fire: 2, electric: 2, grass: 0.5, poison: 2, flying: 0, bug: 0.5, rock: 2, steel: 2 },
+    flying: { electric: 0.5, grass: 2, fighting: 2, bug: 2, rock: 0.5, steel: 0.5 },
+    psychic: { fighting: 2, poison: 2, psychic: 0.5, dark: 0, steel: 0.5 },
+    bug: { fire: 0.5, grass: 2, fighting: 0.5, poison: 0.5, flying: 0.5, psychic: 2, ghost: 0.5, dark: 2, steel: 0.5, fairy: 0.5 },
+    rock: { fire: 2, ice: 2, fighting: 0.5, ground: 0.5, flying: 2, bug: 2, steel: 0.5 },
+    ghost: { normal: 0, psychic: 2, ghost: 2, dark: 0.5 },
+    dragon: { dragon: 2, steel: 0.5, fairy: 0 },
+    dark: { fighting: 0.5, psychic: 2, ghost: 2, dark: 0.5, fairy: 0.5 },
+    steel: { fire: 0.5, water: 0.5, electric: 0.5, ice: 2, rock: 2, steel: 0.5, fairy: 2 },
+    fairy: { fire: 0.5, fighting: 2, poison: 0.5, dragon: 2, dark: 2, steel: 0.5 },
+  });
+
+  function nature(id, name, increasedStat = null, decreasedStat = null) {
+    return deepFreeze({ id, name, increasedStat, decreasedStat });
+  }
+
+  const NATURE_LIST = [
+    nature("hardy", "がんばりや"), nature("lonely", "さみしがり", "attack", "defense"),
+    nature("brave", "ゆうかん", "attack", "speed"), nature("adamant", "いじっぱり", "attack", "specialAttack"),
+    nature("naughty", "やんちゃ", "attack", "specialDefense"), nature("bold", "ずぶとい", "defense", "attack"),
+    nature("docile", "すなお"), nature("relaxed", "のんき", "defense", "speed"),
+    nature("impish", "わんぱく", "defense", "specialAttack"), nature("lax", "のうてんき", "defense", "specialDefense"),
+    nature("timid", "おくびょう", "speed", "attack"), nature("hasty", "せっかち", "speed", "defense"),
+    nature("serious", "まじめ"), nature("jolly", "ようき", "speed", "specialAttack"),
+    nature("naive", "むじゃき", "speed", "specialDefense"), nature("modest", "ひかえめ", "specialAttack", "attack"),
+    nature("mild", "おっとり", "specialAttack", "defense"), nature("quiet", "れいせい", "specialAttack", "speed"),
+    nature("bashful", "てれや"), nature("rash", "うっかりや", "specialAttack", "specialDefense"),
+    nature("calm", "おだやか", "specialDefense", "attack"), nature("gentle", "おとなしい", "specialDefense", "defense"),
+    nature("sassy", "なまいき", "specialDefense", "speed"), nature("careful", "しんちょう", "specialDefense", "specialAttack"),
+    nature("quirky", "きまぐれ"),
+  ];
+  const NATURES = indexBy(NATURE_LIST, "id");
+  const NATURES_BY_NAME = indexBy(NATURE_LIST, "name");
+
+  function ability(id, name, effects, description) {
+    return deepFreeze({ id, name, effects, description });
+  }
+
+  const ABILITY_LIST = [
+    ability("merciless", "ひとでなし", [{ kind: "alwaysCritical", condition: "targetPoisoned" }], "どく・もうどく状態の相手への攻撃が必ず急所に当たる。"),
+    ability("poison-puppeteer", "どくくぐつ", [{ kind: "confuseWhenUserPoisonsTarget" }], "自分の技で相手をどく・もうどく状態にした時、その相手を混乱させる。"),
+    ability("trace", "トレース", [{ kind: "copyOpponentAbilityOnEntry" }], "場に出た時、相手の特性をコピーする。"),
+    ability("super-luck", "きょううん", [{ kind: "criticalStage", stages: 1 }], "急所ランクが1段階上がる。"),
+    ability("regenerator", "さいせいりょく", [{ kind: "healOnSwitchOut", maxHpRatio: 1 / 3 }], "手持ちに戻る時、最大HPの1/3を回復する。"),
+    ability("intimidate", "いかく", [{ kind: "lowerOpponentStatOnEntry", stat: "attack", stages: -1 }], "場に出た時、相手の攻撃を1段階下げる。"),
+    ability("oblivious", "どんかん", [{ kind: "mentalImmunity", conditions: ["infatuation", "taunt", "intimidate"] }], "メロメロ・ちょうはつ・いかくを無効化する。"),
+    ability("unaware", "てんねん", [{ kind: "ignoreOpponentStagesDuringDamage" }], "ダメージ計算時、相手の能力ランク変化を無視する。"),
+    ability("technician", "テクニシャン", [{ kind: "lowPowerMoveMultiplier", maximumPower: 60, multiplier: 1.5 }], "威力60以下の技の威力を1.5倍にする。"),
+    ability("simple", "たんじゅん", [{ kind: "stageChangeMultiplier", multiplier: 2 }], "自分への能力ランク変化量が2倍になる。"),
+    ability("own-tempo", "マイペース", [{ kind: "volatileImmunity", conditions: ["confusion", "intimidate"] }], "混乱状態といかくを無効化する。"),
+    ability("magic-bounce", "マジックミラー", [{ kind: "reflectStatusMoves" }], "相手から受ける反射可能な変化技を相手に跳ね返す。"),
+    ability("comatose", "ぜったいねむり", [{ kind: "comatose" }, { kind: "majorStatusImmunity" }], "常にねむり状態として扱われるが行動でき、他の状態異常にならない。"),
+    ability("berserk", "ぎゃくじょう", [{ kind: "raiseStatWhenCrossingHalfHp", stat: "specialAttack", stages: 1 }], "攻撃でHPが半分以下になった時、特攻が1段階上がる。"),
+    ability("sticky-hold", "ねんちゃく", [{ kind: "preventHeldItemRemoval" }], "持ち物を奪われたり交換されたりしない。"),
+    ability("battle-armor", "カブトアーマー", [{ kind: "preventCriticalHits" }], "相手の攻撃が急所に当たらない。"),
+    ability("compound-eyes", "ふくがん", [{ kind: "accuracyMultiplier", multiplier: 1.3 }], "使用する技の命中率を1.3倍にする。"),
+    ability("sand-stream", "すなおこし", [{ kind: "weatherOnEntry", weather: "sandstorm", turns: 5 }], "場に出た時、天気を5ターン砂嵐にする。"),
+  ];
+  const ABILITIES = indexBy(ABILITY_LIST, "id");
+  const ABILITIES_BY_NAME = indexBy(ABILITY_LIST, "name");
+
+  const BATTLE_RULES = deepFreeze({
+    format: "single-6-pick-3",
+    level: 50,
+    partySize: 6,
+    selectionSize: 3,
+    movesPerPokemon: 4,
+    defaultIv: 31,
+    maxEvPerStat: 252,
+    maxTotalEv: 510,
+    speciesClause: true,
+    itemClause: true,
+    maxStatStage: 6,
+    minStatStage: -6,
+  });
+
   const GAME_DATA = deepFreeze({
     schemaVersion: 1,
     battleRuleset: "scarlet-violet",
@@ -744,6 +847,14 @@
     types: TYPES,
     moveCategories: MOVE_CATEGORIES,
     moveTargets: MOVE_TARGETS,
+    typeChart: TYPE_CHART,
+    natures: NATURES,
+    naturesByName: NATURES_BY_NAME,
+    natureList: NATURE_LIST,
+    abilities: ABILITIES,
+    abilitiesByName: ABILITIES_BY_NAME,
+    abilityList: ABILITY_LIST,
+    battleRules: BATTLE_RULES,
     pokemon: POKEMON,
     pokemonByName: POKEMON_BY_NAME,
     pokemonList: POKEMON_LIST,
@@ -761,6 +872,7 @@
   global.POKEMON_DATA = POKEMON;
   global.MOVE_DATA = MOVES;
   global.ITEM_DATA = ITEMS;
+  global.ABILITY_DATA = ABILITIES;
   global.gameData = GAME_DATA;
   global.pokemonData = POKEMON_LIST;
   global.moveData = MOVE_LIST;

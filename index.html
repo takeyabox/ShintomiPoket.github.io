@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <meta name="description" content="オリジナルポケモンで戦う、2人用オンライン対戦ゲーム">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Shintomi Poket — Online Battle">
+  <meta property="og:description" content="6体を組み、3体を選ぶ。2デバイス同期型オンラインシングルバトル。">
+  <meta property="og:image" content="https://takeyabox.github.io/ShintomiPoket.github.io/public/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="627">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Shintomi Poket — Online Battle">
+  <meta name="twitter:description" content="6体を組み、3体を選ぶ。2デバイス同期型オンラインシングルバトル。">
+  <meta name="twitter:image" content="https://takeyabox.github.io/ShintomiPoket.github.io/public/og.png">
+  <title>Shintomi Poket — Online Battle</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site-header">
+    <button class="brand" id="homeButton" type="button" aria-label="トップへ戻る">
+      <span class="brand-mark" aria-hidden="true">SP</span>
+      <span><strong>Shintomi Poket</strong><small>ONLINE BATTLE</small></span>
+    </button>
+    <div class="header-tools">
+      <section class="cloud-controls" id="cloudControls" aria-label="Firebase編成セーブ" hidden>
+        <span class="cloud-state"><small>CLOUD TEAM</small><b id="cloudSaveState">未確認</b></span>
+        <button id="cloudLoadButton" type="button">ロード</button>
+        <button id="cloudSaveButton" type="button">セーブ</button>
+      </section>
+      <div class="connection-pill" id="connectionPill" data-state="offline">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="connectionText">未接続</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="app">
+    <section class="screen login-screen is-active" id="loginScreen" aria-labelledby="loginTitle">
+      <div class="hero-copy">
+        <p class="eyebrow">6体を組み、3体を選び、読み合え。</p>
+        <h1 id="loginTitle">一手ずつ、<br><span>勝負が動く。</span></h1>
+        <p class="hero-lead">オリジナルポケモン専用の、2デバイス同期型シングルバトル。対戦状態は部屋に保存され、再接続しても同じターンから戻れます。</p>
+        <div class="feature-row" aria-label="ゲームの特徴">
+          <span>6 → 3 SELECT</span><span>TURN SYNC</span><span>GEN 9 RULES</span>
+        </div>
+      </div>
+
+      <form class="login-card panel" id="loginForm">
+        <div class="step-label">PLAYER ENTRY</div>
+        <label for="playerName">プレイヤー名</label>
+        <input id="playerName" name="playerName" maxlength="20" autocomplete="nickname" placeholder="名前を入力" required>
+        <p class="field-help">この名前がゲーム内のIDと編成スロットになります。同じ名前なら別端末からもロードできます。</p>
+
+        <details class="firebase-settings" id="firebaseSettings">
+          <summary>Firebase接続設定</summary>
+          <div class="settings-grid">
+            <label>API Key<input name="apiKey" autocomplete="off"></label>
+            <label>Project ID<input name="projectId" autocomplete="off"></label>
+            <label>Database URL<input name="databaseURL" type="url" autocomplete="off" placeholder="https://…-default-rtdb.firebaseio.com"></label>
+            <label>App ID<input name="appId" autocomplete="off"></label>
+            <label>Auth Domain<input name="authDomain" autocomplete="off"></label>
+          </div>
+          <p class="field-help">Firebase Consoleのウェブアプリ設定を入力します。値はこの端末だけに保存されます。</p>
+        </details>
+
+        <button class="primary-button" type="submit"><span>オンラインで始める</span><b aria-hidden="true">→</b></button>
+        <button class="secondary-button" id="localDemoButton" type="button">この端末で対戦を試す</button>
+        <p class="form-message" id="loginMessage" role="alert"></p>
+      </form>
+    </section>
+
+    <section class="screen team-screen" id="teamScreen" aria-labelledby="teamTitle">
+      <div class="screen-heading">
+        <div><p class="eyebrow">TEAM BUILDER</p><h2 id="teamTitle">6体の戦い方を決める</h2></div>
+        <div class="heading-actions"><button class="ghost-button" id="resetPartyButton" type="button">初期化</button><button class="primary-button compact" id="toRoomsButton" type="button">編成を保存して次へ</button></div>
+      </div>
+      <div class="rules-strip"><span>Lv.50</span><span>技 1〜4個</span><span>努力値 合計510</span><span>同じ持ち物は不可</span></div>
+      <div class="party-grid" id="partyGrid"></div>
+      <p class="form-message sticky-message" id="partyMessage" role="alert"></p>
+    </section>
+
+    <section class="screen rooms-screen" id="roomsScreen" aria-labelledby="roomsTitle">
+      <div class="screen-heading">
+        <div><p class="eyebrow">MATCH LOBBY</p><h2 id="roomsTitle">対戦する部屋を選ぶ</h2></div>
+        <button class="ghost-button" id="backToTeamButton" type="button">編成に戻る</button>
+      </div>
+      <div class="room-grid" id="roomGrid"></div>
+      <div class="waiting-card panel" id="waitingCard" hidden>
+        <div class="radar" aria-hidden="true"><i></i><i></i><i></i></div>
+        <p class="eyebrow">ROOM <span id="waitingRoomNumber"></span></p>
+        <h3>対戦相手を待っています</h3>
+        <p>もう一方の端末で同じ部屋を選んでください。</p>
+        <button class="ghost-button" id="leaveWaitingButton" type="button">部屋を出る</button>
+      </div>
+      <p class="form-message" id="roomMessage" role="alert"></p>
+    </section>
+
+    <section class="screen preview-screen" id="previewScreen" aria-labelledby="previewTitle">
+      <div class="screen-heading">
+        <div><p class="eyebrow">TEAM PREVIEW</p><h2 id="previewTitle">連れていく3体を順番に選ぶ</h2></div>
+        <div class="selection-counter"><strong id="selectionCount">0</strong><span>/ 3</span></div>
+      </div>
+      <div class="preview-columns">
+        <article><div class="column-label">YOUR TEAM</div><div class="preview-team selectable" id="myPreviewTeam"></div></article>
+        <div class="versus-mark" aria-hidden="true">VS</div>
+        <article><div class="column-label">OPPONENT</div><div class="preview-team" id="opponentPreviewTeam"></div></article>
+      </div>
+      <div class="preview-actions"><button class="ghost-button" id="clearSelectionButton" type="button">選び直す</button><button class="primary-button compact" id="submitSelectionButton" type="button" disabled>この順番で決定</button></div>
+      <p class="form-message" id="previewMessage" role="status"></p>
+    </section>
+
+    <section class="screen battle-screen" id="battleScreen" aria-labelledby="battleTitle">
+      <h2 class="visually-hidden" id="battleTitle">オンライン対戦</h2>
+      <div class="battle-layout">
+        <section class="battle-stage panel">
+          <div class="trainer-line opponent-line"><span id="opponentName">OPPONENT</span><div class="team-orbs" id="opponentOrbs"></div></div>
+          <article class="pokemon-status opponent-status" id="opponentStatus"></article>
+          <div class="arena" aria-hidden="true"><div class="arena-ring"></div><div class="arena-center">SP</div></div>
+          <div class="field-effects" id="fieldEffects"></div>
+          <article class="pokemon-status player-status" id="playerStatus"></article>
+          <div class="trainer-line player-line"><span id="myName">YOU</span><div class="team-orbs" id="playerOrbs"></div></div>
+        </section>
+
+        <aside class="battle-console">
+          <div class="turn-header"><div><small>TURN</small><strong id="turnNumber">1</strong></div><span id="battleSyncState">入力してください</span></div>
+          <div class="command-panel" id="commandPanel"></div>
+          <div class="battle-log panel" id="battleLog" aria-live="polite"></div>
+          <button class="text-button" id="leaveBattleButton" type="button">対戦を終了して部屋を出る</button>
+        </aside>
+      </div>
+      <p class="form-message" id="battleMessage" role="alert"></p>
+    </section>
+
+    <section class="screen result-screen" id="resultScreen" aria-labelledby="resultTitle">
+      <div class="result-card panel">
+        <p class="eyebrow">BATTLE RESULT</p>
+        <div class="result-emblem" id="resultEmblem" aria-hidden="true">WIN</div>
+        <h2 id="resultTitle">勝利！</h2>
+        <p id="resultDescription"></p>
+        <div class="result-actions"><button class="primary-button compact" id="rematchButton" type="button">再戦を申し込む</button><button class="secondary-button" id="leaveResultButton" type="button">部屋を出る</button></div>
+        <p class="form-message" id="resultMessage" role="status"></p>
+      </div>
+    </section>
+  </main>
+
+  <template id="pokemonCardTemplate"></template>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="data.js"></script>
+  <script src="battle-engine.js"></script>
+  <script src="firebase-config.js"></script>
+  <script src="firebase-sync.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>

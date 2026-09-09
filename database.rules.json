@@ -1,0 +1,25 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "playerProfiles": {
+      "$playerKey": {
+        ".read": "auth != null && $playerKey.matches(/^p_[A-Za-z0-9_-]+$/)",
+        ".write": "auth != null && $playerKey.matches(/^p_[A-Za-z0-9_-]+$/)",
+        ".validate": "!newData.exists() || (newData.hasChildren(['schemaVersion', 'playerKey', 'playerName', 'party', 'updatedAt', 'updatedByUid']) && newData.child('schemaVersion').val() == 1 && newData.child('playerKey').val() == $playerKey && newData.child('playerName').isString() && newData.child('playerName').val().length > 0 && newData.child('playerName').val().length <= 20 && newData.child('party').numChildren() == 6 && newData.child('updatedAt').isNumber() && newData.child('updatedByUid').val() == auth.uid)",
+        "party": {
+          "$index": {
+            ".validate": "$index.matches(/^[0-5]$/) && newData.hasChildren(['speciesId', 'level', 'natureId', 'abilityId', 'moveIds', 'evs', 'ivs']) && newData.child('speciesId').isString() && newData.child('level').isNumber() && newData.child('moveIds').numChildren() >= 1 && newData.child('moveIds').numChildren() <= 4 && newData.child('evs').numChildren() == 6 && newData.child('ivs').numChildren() == 6"
+          }
+        }
+      }
+    },
+    "rooms": {
+      "$room": {
+        ".read": "auth != null && $room.matches(/^[1-5]$/)",
+        ".write": "auth != null && $room.matches(/^[1-5]$/) && (!data.exists() || data.child('members').child(auth.uid).val() == true || (data.child('members').numChildren() < 2 && newData.child('members').child(auth.uid).val() == true))",
+        ".validate": "!newData.exists() || (newData.hasChildren(['version', 'roomNumber', 'phase', 'players', 'members']) && newData.child('roomNumber').val() >= 1 && newData.child('roomNumber').val() <= 5 && newData.child('players').numChildren() <= 2 && newData.child('members').numChildren() <= 2)"
+      }
+    }
+  }
+}

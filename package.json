@@ -1,0 +1,9 @@
+{
+  "name": "shintomi-poket",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test",
+    "serve": "python3 -m http.server 8000"
+  }
+}
