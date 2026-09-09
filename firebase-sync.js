@@ -13,7 +13,19 @@
   }
 
   function validConfig(config) {
-    return Boolean(config?.apiKey && config?.projectId && config?.databaseURL && config?.appId);
+    return Boolean(config?.apiKey && config?.authDomain && config?.projectId && config?.databaseURL && config?.appId);
+  }
+
+  function configFingerprint(config) {
+    const source = ["apiKey", "authDomain", "databaseURL", "projectId", "appId"]
+      .map((key) => String(config?.[key] || "").trim())
+      .join("|");
+    let hash = 2166136261;
+    for (let index = 0; index < source.length; index += 1) {
+      hash ^= source.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
   }
 
   function applyBattleAction(room, playerKey, action) {
@@ -68,7 +80,10 @@
       ]);
       this.authApi = authApi;
       this.dbApi = dbApi;
-      const appName = `shintomi-${this.config.projectId}`;
+      // Firebase apps keep their initial options for their lifetime. Including
+      // every option in the name prevents a failed config attempt from being
+      // silently reused after the player corrects the form.
+      const appName = `shintomi-${this.config.projectId}-${configFingerprint(this.config)}`;
       this.app = appApi.getApps().find((app) => app.name === appName) || appApi.initializeApp(this.config, appName);
       this.auth = authApi.getAuth(this.app);
       this.database = dbApi.getDatabase(this.app);
@@ -282,8 +297,8 @@
 
   global.FirebaseBattleRoom = FirebaseBattleRoom;
   global.firebasePlayerKey = playerKeyFromName;
-  global.FirebaseRoomProtocol = Object.freeze({ playerKeyFromName, applyBattleAction });
+  global.FirebaseRoomProtocol = Object.freeze({ playerKeyFromName, applyBattleAction, validConfig, configFingerprint });
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { FirebaseBattleRoom, playerKeyFromName, applyBattleAction };
+    module.exports = { FirebaseBattleRoom, playerKeyFromName, applyBattleAction, validConfig, configFingerprint };
   }
 })(typeof globalThis !== "undefined" ? globalThis : window);

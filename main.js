@@ -35,7 +35,7 @@
 
   const elements = Object.fromEntries([
     "loginScreen", "teamScreen", "roomsScreen", "previewScreen", "battleScreen", "resultScreen",
-    "loginForm", "playerName", "firebaseSettings", "loginMessage", "localDemoButton", "connectionPill", "connectionText",
+    "loginForm", "playerName", "firebaseSettings", "firebaseConfigReset", "loginMessage", "localDemoButton", "connectionPill", "connectionText",
     "cloudControls", "cloudSaveState", "cloudLoadButton", "cloudSaveButton",
     "partyGrid", "partyMessage", "toRoomsButton", "resetPartyButton", "backToTeamButton", "roomGrid", "roomMessage",
     "waitingCard", "waitingRoomNumber", "leaveWaitingButton", "myPreviewTeam", "opponentPreviewTeam", "selectionCount",
@@ -187,7 +187,7 @@
 
   function currentFirebaseConfig() {
     const stored = safeJsonParse(localStorage.getItem(STORAGE.firebase), {});
-    return { ...global.FIREBASE_CONFIG, ...stored };
+    return global.resolveFirebaseConfig(global.FIREBASE_CONFIG, stored);
   }
 
   function populateLogin() {
@@ -203,6 +203,12 @@
     return Object.fromEntries(["apiKey", "projectId", "databaseURL", "appId", "authDomain"].map((key) => [key, elements.loginForm.elements.namedItem(key).value.trim()]));
   }
 
+  function resetFirebaseConfig() {
+    localStorage.removeItem(STORAGE.firebase);
+    populateLogin();
+    message(elements.loginMessage, "公開サイトに設定済みのFirebase構成を読み込み直しました。", true);
+  }
+
   async function onlineLogin(event) {
     event.preventDefault();
     const playerName = elements.playerName.value.normalize("NFKC").trim();
@@ -210,7 +216,7 @@
     const config = readConfigForm();
     if (!global.FirebaseBattleRoom.isConfigured(config)) {
       elements.firebaseSettings.open = true;
-      return message(elements.loginMessage, "オンライン対戦にはFirebaseの4項目を入力してください。");
+      return message(elements.loginMessage, "オンライン対戦にはFirebaseの5項目をすべて入力してください。");
     }
     message(elements.loginMessage, "Firebaseへ接続しています…", true);
     elements.loginForm.querySelector("button[type=submit]").disabled = true;
@@ -255,8 +261,11 @@
 
   function firebaseFriendlyError(error) {
     const text = error?.message || String(error);
+    if (/auth\/configuration-not-found|CONFIGURATION_NOT_FOUND/i.test(text)) return "Firebase Authenticationが未設定です。Firebase ConsoleでAuthenticationの利用を開始し、匿名ログインを有効にしてください。";
+    if (/auth\/invalid-api-key|API key not valid|API_KEY_INVALID/i.test(text)) return "FirebaseのAPI Keyがこのプロジェクトと一致していません。接続設定を確認してください。";
+    if (/auth\/unauthorized-domain/i.test(text)) return `Firebase Authenticationの承認済みドメインに「${global.location?.hostname || "公開ドメイン"}」を追加してください。`;
     if (/network|fetch|import|Failed to load/i.test(text)) return "Firebaseへ接続できません。ネットワークと設定を確認してください。";
-    if (/auth\/operation-not-allowed/i.test(text)) return "Firebase Consoleで匿名認証を有効にしてください。";
+    if (/auth\/operation-not-allowed/i.test(text)) return "Firebase ConsoleのAuthentication > ログイン方法で匿名ログインを有効にしてください。";
     if (/permission_denied|permission-denied/i.test(text)) return "Realtime Databaseのルールを設定してください。";
     return text;
   }
@@ -683,6 +692,7 @@
 
   function bindEvents() {
     elements.loginForm.addEventListener("submit", onlineLogin);
+    elements.firebaseConfigReset.addEventListener("click", resetFirebaseConfig);
     elements.localDemoButton.addEventListener("click", startLocalMode);
     elements.partyGrid.addEventListener("change", (event) => updatePartyFromControl(event.target));
     elements.cloudSaveButton.addEventListener("click", () => savePartyToFirebase().catch(() => {}));

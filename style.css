@@ -182,6 +182,8 @@ input::placeholder { color: #657080; }
 .settings-grid label { font-size: 10px; }
 .settings-grid label:nth-child(3) { grid-column: 1 / -1; }
 .settings-grid input { min-height: 38px; margin-top: 5px; font-size: 12px; }
+.firebase-settings code { color: var(--paper); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.config-reset { display: flex; margin: 2px 0 14px auto; }
 
 .primary-button, .secondary-button, .ghost-button, .text-button {
   display: inline-flex;

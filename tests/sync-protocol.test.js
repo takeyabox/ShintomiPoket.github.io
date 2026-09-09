@@ -3,7 +3,13 @@ const assert = require("node:assert/strict");
 
 require("../data.js");
 const engine = require("../battle-engine.js");
-const { FirebaseBattleRoom, applyBattleAction, playerKeyFromName } = require("../firebase-sync.js");
+const {
+  FirebaseBattleRoom,
+  applyBattleAction,
+  configFingerprint,
+  playerKeyFromName,
+  validConfig,
+} = require("../firebase-sync.js");
 
 function roomState() {
   const party = engine.createDefaultParty();
@@ -26,6 +32,25 @@ test("Japanese player names produce stable Firebase-safe keys", () => {
   const key = playerKeyFromName(" 竹重 颯真 ");
   assert.equal(key, playerKeyFromName("竹重 颯真"));
   assert.match(key, /^p_[A-Za-z0-9_-]+$/);
+});
+
+test("Firebase config requires all web authentication fields", () => {
+  const complete = {
+    apiKey: "key",
+    authDomain: "example.firebaseapp.com",
+    databaseURL: "https://example.firebasedatabase.app",
+    projectId: "example",
+    appId: "app",
+  };
+  assert.equal(validConfig(complete), true);
+  assert.equal(validConfig({ ...complete, authDomain: "" }), false);
+});
+
+test("corrected Firebase config receives a different app fingerprint", () => {
+  const first = { apiKey: "wrong", authDomain: "example.firebaseapp.com", databaseURL: "db", projectId: "example", appId: "app" };
+  const corrected = { ...first, apiKey: "correct" };
+  assert.equal(configFingerprint(first), configFingerprint({ ...first }));
+  assert.notEqual(configFingerprint(first), configFingerprint(corrected));
 });
 
 test("a turn advances only after both device commands arrive", () => {
