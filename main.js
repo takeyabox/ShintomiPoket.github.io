@@ -24,6 +24,8 @@
     client: null,
     room: null,
     roomNumber: null,
+    roomSummaries: {},
+    lobbySubscribed: false,
     localMode: false,
     selection: [],
     actionPending: false,
@@ -548,11 +550,50 @@
     }
   }
 
+  function startLobbySubscription() {
+    if (state.localMode || !state.client || state.lobbySubscribed) return;
+    state.lobbySubscribed = true;
+    try {
+      state.client.subscribeLobby((summaries) => {
+        state.roomSummaries = summaries;
+        if (state.screen === "rooms" && !state.room) renderRooms();
+      }, (error) => {
+        if (state.screen === "rooms" && !state.room) message(elements.roomMessage, firebaseFriendlyError(error));
+      });
+    } catch (error) {
+      state.lobbySubscribed = false;
+      message(elements.roomMessage, firebaseFriendlyError(error));
+    }
+  }
+
+  function lobbyStatus(summary) {
+    if (!summary) return { label: "状況を取得中…", state: "loading" };
+    if (!summary.players.length) return { label: "空室・入室できます", state: "open" };
+    if (summary.players.some((player) => !player.online)) return { label: "接続復帰を待機中", state: "disconnected" };
+    if (summary.phase === "waiting") return { label: "対戦相手を待機中", state: "waiting" };
+    if (summary.phase === "teamPreview") return { label: "3体選出中", state: "busy" };
+    if (summary.phase === "battle") return { label: `対戦中・ターン ${summary.turn}`, state: "busy" };
+    if (summary.phase === "result") return { label: "対戦終了・再戦待ち", state: "busy" };
+    return { label: "状態を確認できません", state: "disconnected" };
+  }
+
   function renderRooms() {
     elements.roomGrid.hidden = false;
     elements.waitingCard.hidden = true;
-    elements.roomGrid.innerHTML = [1, 2, 3, 4, 5].map((room) => `<button class="room-button" data-room="${room}" type="button"><small>ROOM 0${room}</small><strong>${room}番の部屋</strong><span>入室して相手を待つ →</span></button>`).join("");
+    elements.roomGrid.innerHTML = [1, 2, 3, 4, 5].map((room) => {
+      const summary = state.localMode ? { phase: "empty", players: [] } : state.roomSummaries[room];
+      const status = state.localMode ? { label: "CPU戦を開始できます", state: "open" } : lobbyStatus(summary);
+      const players = summary?.players || [];
+      const full = players.length >= 2;
+      const unavailable = (!state.localMode && !summary) || full || players.some((player) => !player.online);
+      const playerList = players.length
+        ? players.map((player) => `<b class="room-player-name" data-online="${player.online}">${escapeHtml(player.name)}${player.online ? "" : "（切断中）"}</b>`).join("")
+        : `<b class="room-player-empty">${summary ? "プレイヤーはいません" : "プレイヤー情報を取得中"}</b>`;
+      const suffix = full ? "・満室" : unavailable ? "" : " →";
+      return `<button class="room-button" data-room="${room}" type="button"${unavailable ? " disabled" : ""}><small><span>ROOM 0${room}</span><em>${summary ? players.length : "—"} / 2</em></small><strong>${room}番の部屋</strong><span class="room-player-list">${playerList}</span><span class="room-status" data-state="${status.state}">${escapeHtml(status.label)}${suffix}</span></button>`;
+    }).join("");
     message(elements.roomMessage, state.localMode ? "ローカルモードでは選んだ部屋ですぐCPU戦を開始します。" : "");
+    startLobbySubscription();
   }
 
   async function joinRoom(roomNumber) {
@@ -652,7 +693,7 @@
 
   function previewMon(teamEntry, index, selectable) {
     const species = DATA.pokemon[teamEntry.speciesId];
-    const order = state.selection.indexOf(index);
+    const order = selectable ? state.selection.indexOf(index) : -1;
     const content = `<span class="preview-icon" style="--type-color:${TYPE_COLORS[species.typeIds[0]]}">${escapeHtml(species.name.slice(0, 1))}</span><span><strong>${escapeHtml(teamEntry.name)}</strong><small>${species.types.join(" / ")}</small></span>${order >= 0 ? `<b class="selection-order">${order + 1}</b>` : ""}`;
     return selectable
       ? `<button type="button" class="preview-mon${order >= 0 ? " selected" : ""}" data-select-index="${index}">${content}</button>`

@@ -107,6 +107,58 @@ test("Focus Sash survives a lethal hit exactly once", () => {
   assert.equal(next.players[1].team[0].itemConsumed, true);
 });
 
+test("Sitrus Berry activates after a faster Belly Drum before the opponent moves", () => {
+  const [teamA, teamB] = defaultTeams();
+  const state = battleWith(teamA, teamB, 90210);
+  const user = state.players[0].team[0];
+  const opponent = state.players[1].team[0];
+  user.moves = [{ id: "belly-drum", pp: 10, maxPp: 10 }];
+  user.itemId = "sitrus-berry";
+  user.hp = 200;
+  user.maxHp = 200;
+  user.stats.speed = 9999;
+  user.stats.specialDefense = 9999;
+  opponent.moves = [{ id: "psychic", pp: 10, maxPp: 10 }];
+  opponent.stats.speed = 1;
+  opponent.stats.specialAttack = 1;
+
+  const next = engine.resolveTurn(state, {
+    "player-a": { type: "move", moveId: "belly-drum" },
+    "player-b": { type: "move", moveId: "psychic" },
+  });
+  const berryIndex = next.log.findIndex((entry) => entry.itemId === "sitrus-berry" && entry.reason === "lowHp");
+  const opponentMoveIndex = next.log.findIndex((entry) => entry.type === "move" && entry.playerId === "player-b");
+  assert.ok(berryIndex >= 0 && berryIndex < opponentMoveIndex);
+  assert.equal(next.players[0].team[0].itemConsumed, true);
+  assert.equal(next.players[0].team[0].stages.attack, 6);
+  assert.ok(next.players[0].team[0].hp > 100);
+});
+
+test("Sitrus Berry activates immediately after recoil damage", () => {
+  const [teamA, teamB] = defaultTeams();
+  const state = battleWith(teamA, teamB, 4477);
+  const user = state.players[0].team[0];
+  const opponent = state.players[1].team[0];
+  user.moves = [{ id: "double-edge", pp: 15, maxPp: 15 }];
+  user.itemId = "sitrus-berry";
+  user.hp = 101;
+  user.maxHp = 200;
+  user.stats.speed = 9999;
+  user.stats.attack = 1;
+  opponent.moves = [{ id: "celebrate", pp: 40, maxPp: 40 }];
+  opponent.hp = 1000;
+  opponent.maxHp = 1000;
+  opponent.stats.defense = 9999;
+
+  const next = engine.resolveTurn(state, {
+    "player-a": { type: "move", moveId: "double-edge" },
+    "player-b": { type: "move", moveId: "celebrate" },
+  });
+  assert.ok(next.log.some((entry) => entry.itemId === "sitrus-berry" && entry.reason === "lowHp"));
+  assert.equal(next.players[0].team[0].itemConsumed, true);
+  assert.ok(next.players[0].team[0].hp > 100);
+});
+
 test("fainted active Pokemon requires and accepts a replacement", () => {
   const [teamA, teamB] = defaultTeams();
   const state = battleWith(teamA, teamB);

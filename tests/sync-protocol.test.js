@@ -8,6 +8,7 @@ const {
   applyBattleAction,
   applyTeamSelection,
   configFingerprint,
+  lobbyRoomSummary,
   normaliseRoomState,
   playerKeyFromName,
   removePlayerFromRoom,
@@ -96,6 +97,42 @@ test("corrected Firebase config receives a different app fingerprint", () => {
   const corrected = { ...first, apiKey: "correct" };
   assert.equal(configFingerprint(first), configFingerprint({ ...first }));
   assert.notEqual(configFingerprint(first), configFingerprint(corrected));
+});
+
+test("lobby summaries expose player names and room progress without team data", () => {
+  const room = previewRoomState();
+  room.phase = "battle";
+  room.battle = { turn: 7 };
+  room.players.two.online = false;
+  const summary = lobbyRoomSummary(4, room);
+  assert.equal(summary.roomNumber, 4);
+  assert.equal(summary.phase, "battle");
+  assert.equal(summary.turn, 7);
+  assert.deepEqual(summary.players.map((player) => player.name), ["ONE", "TWO"]);
+  assert.equal(summary.players[1].online, false);
+  assert.equal("party" in summary.players[0], false);
+  assert.deepEqual(lobbyRoomSummary(5, null), { roomNumber: 5, phase: "empty", turn: null, players: [] });
+});
+
+test("the lobby watches all five readable room paths", () => {
+  const client = new FirebaseBattleRoom({});
+  const callbacks = {};
+  let stopped = 0;
+  client.database = {};
+  client.dbApi = {
+    ref: (_database, path) => path,
+    onValue: (path, callback) => {
+      callbacks[path] = callback;
+      return () => { stopped += 1; };
+    },
+  };
+  const emissions = [];
+  const unsubscribe = client.subscribeLobby((summaries) => emissions.push(summaries));
+  assert.deepEqual(Object.keys(callbacks), ["rooms/1", "rooms/2", "rooms/3", "rooms/4", "rooms/5"]);
+  callbacks["rooms/3"]({ val: () => previewRoomState() });
+  assert.equal(emissions.at(-1)[3].players[0].name, "ONE");
+  unsubscribe();
+  assert.equal(stopped, 5);
 });
 
 test("a turn advances only after both device commands arrive", () => {

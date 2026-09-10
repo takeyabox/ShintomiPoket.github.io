@@ -113,6 +113,26 @@
     return next;
   }
 
+  function lobbyRoomSummary(roomNumber, room) {
+    const players = Object.entries(room?.players || {})
+      .map(([key, player]) => ({
+        id: String(player?.id || key),
+        name: String(player?.name || player?.loginId || "名前未設定"),
+        online: player?.online === true,
+        joinedAt: Number(player?.joinedAt) || 0,
+      }))
+      .sort((left, right) => left.joinedAt - right.joinedAt || left.id.localeCompare(right.id))
+      .map(({ id, name, online }) => ({ id, name, online }));
+    const knownPhases = new Set(["waiting", "teamPreview", "battle", "result"]);
+    const phase = players.length && knownPhases.has(room?.phase) ? room.phase : "empty";
+    return {
+      roomNumber: Number(roomNumber),
+      phase,
+      turn: phase === "battle" ? Number(room?.battle?.turn) || 1 : null,
+      players,
+    };
+  }
+
   function cleanRoomMembers(room) {
     room.members ||= {};
     const ownerUids = new Set(Object.values(room.players || {}).map((player) => player.ownerUid).filter(Boolean));
@@ -225,6 +245,7 @@
       this.unsubscribe = null;
       this.disconnectRegistration = null;
       this.unsubscribeConnection = null;
+      this.unsubscribeLobby = null;
     }
 
     static isConfigured(config) {
@@ -373,6 +394,30 @@
         }
       }, onError);
       return this.unsubscribe;
+    }
+
+    subscribeLobby(onState, onError) {
+      if (!this.database) throw new Error("先にログインしてください。");
+      if (this.unsubscribeLobby) this.unsubscribeLobby();
+      const summaries = Object.fromEntries([1, 2, 3, 4, 5].map((roomNumber) => [roomNumber, null]));
+      const unsubscribers = [1, 2, 3, 4, 5].map((roomNumber) => {
+        const roomRef = this.dbApi.ref(this.database, `rooms/${roomNumber}`);
+        return this.dbApi.onValue(roomRef, (snapshot) => {
+          summaries[roomNumber] = lobbyRoomSummary(roomNumber, snapshot.val());
+          try {
+            onState(global.BattleEngine.clone(summaries));
+          } catch (error) {
+            if (onError) onError(error);
+            else throw error;
+          }
+        }, onError);
+      });
+      const stop = () => {
+        unsubscribers.forEach((unsubscribe) => unsubscribe());
+        if (this.unsubscribeLobby === stop) this.unsubscribeLobby = null;
+      };
+      this.unsubscribeLobby = stop;
+      return stop;
     }
 
     pauseSubscription() {
@@ -545,6 +590,7 @@
     applyTeamSelection,
     normaliseRoomState,
     normaliseSelection,
+    lobbyRoomSummary,
     removePlayerFromRoom,
     roomHasOnlinePlayers,
     validConfig,
@@ -558,6 +604,7 @@
       applyTeamSelection,
       normaliseRoomState,
       normaliseSelection,
+      lobbyRoomSummary,
       removePlayerFromRoom,
       roomHasOnlinePlayers,
       validConfig,

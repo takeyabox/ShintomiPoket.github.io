@@ -248,12 +248,25 @@ input::placeholder { color: #657080; }
 .sticky-message { position: sticky; z-index: 10; bottom: 14px; width: fit-content; min-width: 260px; padding: 10px 14px; border-radius: 10px; background: rgba(16,21,29,.94); }
 
 .room-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
-.room-button { position: relative; min-height: 240px; padding: 24px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ink-2); text-align: left; transition: transform .2s, border-color .2s; }
+.room-button { position: relative; min-height: 240px; padding: 24px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--ink-2); text-align: left; transition: transform .2s, border-color .2s, opacity .2s; }
 .room-button::after { content: attr(data-room); position: absolute; right: -5px; bottom: -35px; color: rgba(255,255,255,.035); font-size: 150px; font-weight: 950; }
-.room-button:hover { transform: translateY(-5px); border-color: var(--accent); }
-.room-button small { color: var(--accent); font-weight: 900; letter-spacing: .2em; }
-.room-button strong { display: block; margin-top: 78px; font-size: 27px; }
-.room-button span { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; }
+.room-button:hover:not(:disabled) { transform: translateY(-5px); border-color: var(--accent); }
+.room-button:disabled { opacity: .68; }
+.room-button > * { position: relative; z-index: 1; }
+.room-button small { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--accent); font-weight: 900; letter-spacing: .2em; }
+.room-button small span { font: inherit; }
+.room-button small em { color: var(--muted); font-size: 9px; font-style: normal; letter-spacing: .08em; }
+.room-button > strong { display: block; margin-top: 30px; font-size: 27px; }
+.room-player-list { display: grid; min-height: 48px; align-content: start; gap: 5px; margin-top: 17px; }
+.room-player-name, .room-player-empty { display: block; overflow: hidden; color: var(--paper); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.room-player-name::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--mint); vertical-align: 1px; }
+.room-player-name[data-online="false"] { color: var(--muted); }
+.room-player-name[data-online="false"]::before { background: var(--danger); }
+.room-player-empty { color: var(--muted); font-weight: 600; }
+.room-status { display: block; margin-top: 7px; color: var(--muted); font-size: 10px; font-weight: 800; }
+.room-status[data-state="open"] { color: var(--mint); }
+.room-status[data-state="waiting"] { color: var(--accent-2); }
+.room-status[data-state="disconnected"] { color: var(--danger); }
 .waiting-card { width: min(520px, 100%); margin: 40px auto; padding: 42px; text-align: center; }
 .waiting-card h3 { margin: 8px 0; font-size: 26px; }
 .waiting-card > p:not(.eyebrow) { color: var(--muted); }
@@ -387,8 +400,8 @@ button.preview-mon { width: 100%; }
   .rules-strip span { flex: 0 0 auto; }
   .ev-editor { grid-template-columns: repeat(3, 1fr); }
   .room-grid { grid-template-columns: 1fr 1fr; }
-  .room-button { min-height: 160px; }
-  .room-button strong { margin-top: 35px; }
+  .room-button { min-height: 205px; padding: 18px; }
+  .room-button > strong { margin-top: 22px; font-size: 21px; }
   .preview-columns { grid-template-columns: 1fr; }
   .versus-mark { text-align: center; }
   .battle-stage { min-height: 510px; padding: 15px; }

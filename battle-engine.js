@@ -482,6 +482,7 @@
     mon.hp -= damage;
     log(state, `${mon.name} は${source}で${damage}ダメージを受けた！`, "damage", { pokemon: mon.uid, value: damage, source });
     faint(state, mon);
+    if (!mon.fainted) activateHealingBerry(state, mon);
     return damage;
   }
 
@@ -893,6 +894,7 @@
           target.volatile.curse = true;
           log(state, `${target.name} はのろわれた！`, "status");
           faint(state, attacker);
+          if (!attacker.fainted) activateHealingBerry(state, attacker);
         } else {
           Object.entries(effect.other).forEach(([stat, stages]) => changeStage(state, attacker, stat, stages, attacker));
         }
@@ -929,6 +931,7 @@
           attacker.hp -= cost;
           attacker.volatile.substituteHp = cost;
           log(state, `${attacker.name} はHPを${cost}使ってみがわりを作った！`, "status");
+          activateHealingBerry(state, attacker);
         }
         break;
       }
@@ -991,6 +994,7 @@
         else {
           attacker.hp -= cost;
           changeStage(state, attacker, "attack", 6 - attacker.stages.attack, attacker);
+          activateHealingBerry(state, attacker);
         }
         break;
       }
@@ -1099,6 +1103,7 @@
         else {
           attacker.hp -= cost;
           Object.entries(effect.stats).forEach(([stat, stages]) => changeStage(state, attacker, stat, stages, attacker));
+          activateHealingBerry(state, attacker);
         }
         break;
       }
