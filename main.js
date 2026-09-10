@@ -748,10 +748,10 @@
   function renderPokemonStatus(mon, own) {
     const percent = Math.max(0, Math.round(mon.hp / mon.maxHp * 100));
     const hpColor = percent > 50 ? "#82d173" : percent > 20 ? "#ffc857" : "#ed5d68";
-    const ability = DATA.abilities[mon.copiedAbilityId || mon.abilityId]?.name || "—";
+    const ownAbility = own ? DATA.abilities[mon.copiedAbilityId || mon.abilityId]?.name || "—" : null;
     const ownItem = own ? DATA.items[mon.itemConsumed ? null : mon.itemId]?.name || "なし" : null;
-    const privateDetails = own ? ` · 持ち物 ${escapeHtml(ownItem)}` : "";
-    return `<div class="pokemon-name-line"><h3>${escapeHtml(mon.name)}</h3><span>Lv.${mon.level}</span></div><div class="type-tags">${mon.typeIds.map((id) => `<i class="type-tag">${DATA.types[id]}</i>`).join("")}</div><div class="hp-track"><i style="--hp:${percent}%;--hp-color:${hpColor}"></i></div><div class="hp-label"><span>HP</span><b>${own ? `${mon.hp} / ${mon.maxHp}` : `${percent}%`}</b></div><div class="condition-row">${escapeHtml(conditionLabel(mon))} · ${escapeHtml(ability)}${privateDetails}</div>`;
+    const privateDetails = own ? ` · 特性 ${escapeHtml(ownAbility)} · 持ち物 ${escapeHtml(ownItem)}` : "";
+    return `<div class="pokemon-name-line"><h3>${escapeHtml(mon.name)}</h3><span>Lv.${mon.level}</span></div><div class="type-tags">${mon.typeIds.map((id) => `<i class="type-tag">${DATA.types[id]}</i>`).join("")}</div><div class="hp-track"><i style="--hp:${percent}%;--hp-color:${hpColor}"></i></div><div class="hp-label"><span>HP</span><b>${own ? `${mon.hp} / ${mon.maxHp}` : `${percent}%`}</b></div><div class="condition-row">${escapeHtml(conditionLabel(mon))}${privateDetails}</div>`;
   }
 
   function renderOrbs(team) {
