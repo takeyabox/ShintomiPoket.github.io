@@ -154,6 +154,78 @@ test("pivot moves use the explicitly selected normal-switch destination", () => 
   assert.equal(next.players[0].active, 2);
 });
 
+function trickBattle({ attackerItem = null, targetItem = null, attackerAbility = null, targetAbility = null } = {}) {
+  const [teamA, teamB] = defaultTeams();
+  const state = battleWith(teamA, teamB, 5519);
+  const attacker = state.players[0].team[0];
+  const target = state.players[1].team[0];
+  attacker.moves = [
+    { id: "trick", pp: 10, maxPp: 10 },
+    { id: "toxic", pp: 10, maxPp: 10 },
+  ];
+  target.moves = [{ id: "celebrate", pp: 40, maxPp: 40 }];
+  attacker.itemId = attackerItem;
+  target.itemId = targetItem;
+  attacker.abilityId = attackerAbility;
+  target.abilityId = targetAbility;
+  attacker.stats.speed = 9999;
+  return state;
+}
+
+function resolveTrick(state) {
+  return engine.resolveTurn(state, {
+    "player-a": { type: "move", moveId: "trick" },
+    "player-b": { type: "move", moveId: "celebrate" },
+  });
+}
+
+test("Trick swaps currently held items and Sticky Hold only protects its target", () => {
+  const userHasStickyHold = resolveTrick(trickBattle({
+    attackerItem: "choice-scarf",
+    attackerAbility: "sticky-hold",
+  }));
+  assert.equal(userHasStickyHold.players[0].team[0].itemId, null);
+  assert.equal(userHasStickyHold.players[1].team[0].itemId, "choice-scarf");
+  assert.equal(userHasStickyHold.players[0].team[0].choiceLockedMoveId, null);
+
+  const targetHasStickyHold = resolveTrick(trickBattle({
+    attackerItem: "choice-scarf",
+    targetItem: "leftovers",
+    targetAbility: "sticky-hold",
+  }));
+  assert.equal(targetHasStickyHold.players[0].team[0].itemId, "choice-scarf");
+  assert.equal(targetHasStickyHold.players[1].team[0].itemId, "leftovers");
+  assert.equal(targetHasStickyHold.players[0].team[0].lastMoveFailed, true);
+});
+
+test("Trick is not reflected by Magic Bounce", () => {
+  const next = resolveTrick(trickBattle({
+    attackerItem: "choice-scarf",
+    targetItem: "leftovers",
+    targetAbility: "magic-bounce",
+  }));
+  assert.equal(next.players[0].team[0].itemId, "leftovers");
+  assert.equal(next.players[1].team[0].itemId, "choice-scarf");
+  assert.equal(next.log.some((entry) => entry.message.includes("マジックミラー")), false);
+});
+
+test("Trick fails when neither Pokemon currently holds an item", () => {
+  const state = trickBattle();
+  state.players[0].team[0].itemId = "sitrus-berry";
+  state.players[0].team[0].itemConsumed = true;
+  state.players[0].team[0].lastConsumedItemId = "sitrus-berry";
+  const next = resolveTrick(state);
+  assert.equal(next.players[0].team[0].itemConsumed, true);
+  assert.equal(next.players[0].team[0].lastConsumedItemId, "sitrus-berry");
+  assert.equal(next.players[0].team[0].lastMoveFailed, true);
+});
+
+test("a Pokemon is no longer Choice-locked after Trick gives its item away", () => {
+  const next = resolveTrick(trickBattle({ attackerItem: "choice-scarf" }));
+  const legal = engine.legalActions(next, "player-a");
+  assert.equal(legal.moves.find((move) => move.id === "toxic").disabled, false);
+});
+
 test("every configured move effect can execute without corrupting state", () => {
   const defaults = engine.createDefaultParty();
   for (const move of GAME_DATA.moveList) {

@@ -121,12 +121,16 @@
     }
   }
 
-  function removePlayerFromRoom(room, playerKey) {
+  function roomHasOnlinePlayers(room) {
+    return Object.values(room?.players || {}).some((player) => player?.online === true);
+  }
+
+  function removePlayerFromRoom(room, playerKey, activityAt = Date.now()) {
     if (!room?.players?.[playerKey]) return room;
     delete room.players[playerKey];
     cleanRoomMembers(room);
     const keys = Object.keys(room.players);
-    if (!keys.length) return null;
+    if (!keys.length || !roomHasOnlinePlayers(room)) return null;
     room.hostId = keys.sort((left, right) => room.players[left].joinedAt - room.players[right].joinedAt || left.localeCompare(right))[0];
     room.phase = "waiting";
     delete room.battle;
@@ -135,6 +139,7 @@
       delete player.selection;
       player.rematch = false;
     }
+    room.lastActivityAt = activityAt;
     room.revision = (room.revision || 0) + 1;
     return room;
   }
@@ -295,11 +300,13 @@
       if (partyErrors.length) throw new Error(partyErrors.slice(0, 3).join(" "));
       const result = await this.dbApi.runTransaction(this.roomRef, (current) => {
         const now = Date.now();
+        const activityAt = this.dbApi.serverTimestamp();
         const next = normaliseRoomState(current) || {
           version: 1,
           roomNumber: room,
           phase: "waiting",
           createdAt: now,
+          lastActivityAt: activityAt,
           seed: global.BattleEngine.hashString(`${room}:${now}:${this.playerKey}`),
           revision: 0,
           players: {},
@@ -330,13 +337,14 @@
           ownerUid: this.user.uid,
           online: true,
           joinedAt: existingPlayer?.joinedAt || now,
-          lastSeenAt: now,
+          lastSeenAt: activityAt,
           party: joinedParty,
           publicTeam: global.BattleEngine.publicTeam(joinedParty),
           selection: existingPlayer?.selection || null,
           rematch: false,
         };
         next.members[this.user.uid] = true;
+        next.lastActivityAt = activityAt;
         const keys = Object.keys(next.players);
         next.hostId = keys.sort((a, b) => next.players[a].joinedAt - next.players[b].joinedAt || a.localeCompare(b))[0];
         if (keys.length === 2 && next.phase === "waiting") next.phase = "teamPreview";
@@ -388,6 +396,36 @@
       return snapshot.exists() ? normaliseRoomState(snapshot.val()) : null;
     }
 
+    async deleteRoomIfEmpty(roomNumber) {
+      const room = Number(roomNumber);
+      if (!this.user) throw new Error("先にログインしてください。");
+      if (!Number.isInteger(room) || room < 1 || room > 5) throw new Error("部屋番号は1〜5です。");
+      if (this.roomNumber === room) this.pauseSubscription();
+      if (this.disconnectRegistration) {
+        try { await this.disconnectRegistration.cancel(); } catch { /* It may already have executed. */ }
+        this.disconnectRegistration = null;
+      }
+      const targetRef = this.dbApi.ref(this.database, `rooms/${room}`);
+      let roomExists = false;
+      let onlinePlayerFound = false;
+      const result = await this.dbApi.runTransaction(targetRef, (current) => {
+        if (!current) return current;
+        roomExists = true;
+        const next = normaliseRoomState(current);
+        if (roomHasOnlinePlayers(next)) {
+          onlinePlayerFound = true;
+          return;
+        }
+        return null;
+      }, { applyLocally: false });
+      const deleted = !roomExists || (!onlinePlayerFound && result.committed && !result.snapshot.exists());
+      if (deleted && this.roomNumber === room) {
+        this.roomRef = null;
+        this.roomNumber = null;
+      }
+      return deleted;
+    }
+
     async updateParty(party) {
       return this.transact((room) => {
         const player = room.players?.[this.playerKey];
@@ -437,10 +475,12 @@
         if (!current) return;
         const next = mutator(normaliseRoomState(current));
         if (!next) return;
+        const activityAt = this.dbApi.serverTimestamp();
         next.revision = (next.revision || 0) + 1;
+        next.lastActivityAt = activityAt;
         if (next.players?.[this.playerKey]) {
           next.players[this.playerKey].online = true;
-          next.players[this.playerKey].lastSeenAt = Date.now();
+          next.players[this.playerKey].lastSeenAt = activityAt;
         }
         return next;
       }, { applyLocally: false });
@@ -461,7 +501,7 @@
       try {
         await this.dbApi.runTransaction(targetRef, (current) => {
           if (!current) return current;
-          return removePlayerFromRoom(normaliseRoomState(current), this.playerKey);
+          return removePlayerFromRoom(normaliseRoomState(current), this.playerKey, this.dbApi.serverTimestamp());
         }, { applyLocally: false });
       } catch (error) {
         const permissionDenied = /permission[_-]denied/i.test(error?.code || error?.message || "");
@@ -488,7 +528,7 @@
       try {
         await this.dbApi.runTransaction(this.roomRef, (room) => {
           if (!room) return room;
-          return removePlayerFromRoom(normaliseRoomState(room), this.playerKey);
+          return removePlayerFromRoom(normaliseRoomState(room), this.playerKey, this.dbApi.serverTimestamp());
         }, { applyLocally: false });
       } finally {
         this.roomRef = null;
@@ -506,6 +546,7 @@
     normaliseRoomState,
     normaliseSelection,
     removePlayerFromRoom,
+    roomHasOnlinePlayers,
     validConfig,
     configFingerprint,
   });
@@ -518,6 +559,7 @@
       normaliseRoomState,
       normaliseSelection,
       removePlayerFromRoom,
+      roomHasOnlinePlayers,
       validConfig,
       configFingerprint,
     };

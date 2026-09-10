@@ -277,6 +277,18 @@
     return mon.itemId && !mon.itemConsumed ? DATA.items[mon.itemId] : null;
   }
 
+  function hasChoiceItem(mon) {
+    return heldItem(mon)?.effect?.kind === "choiceItem";
+  }
+
+  function replaceHeldItem(mon, item) {
+    mon.itemId = item?.id || null;
+    mon.itemConsumed = false;
+    // A Choice lock belongs to the item currently being held. Receiving a
+    // Choice item does not lock a Pokemon until it next uses a move.
+    mon.choiceLockedMoveId = null;
+  }
+
   function consumeItem(state, mon, reason = "used") {
     const current = heldItem(mon);
     if (!current) return null;
@@ -1053,14 +1065,30 @@
       case "callRandomKnownMove":
         executeSleepTalk(state, attackerIndex, attacker, target, action);
         break;
-      case "swapHeldItems":
-        if (hasAbility(attacker, "sticky-hold") || hasAbility(target, "sticky-hold")) log(state, "ねんちゃくで持ち物を交換できない！", "ability");
-        else {
-          [attacker.itemId, target.itemId] = [target.itemId, attacker.itemId];
-          [attacker.itemConsumed, target.itemConsumed] = [target.itemConsumed, attacker.itemConsumed];
+      case "swapHeldItems": {
+        const attackerItem = heldItem(attacker);
+        const targetItem = heldItem(target);
+        // Sticky Hold prevents an opponent from taking the holder's item. It
+        // does not stop that Pokemon from using Trick itself.
+        if (hasAbility(target, "sticky-hold")) {
+          attacker.lastMoveFailed = true;
+          log(state, `${target.name} はねんちゃくで持ち物を守った！`, "ability");
+        } else if (!attackerItem && !targetItem) {
+          attacker.lastMoveFailed = true;
+          log(state, "しかし、うまく決まらなかった！", "fail");
+        } else {
+          replaceHeldItem(attacker, targetItem);
+          replaceHeldItem(target, attackerItem);
           log(state, `${attacker.name} と ${target.name} は持ち物を入れ替えた！`, "item");
+          // Berries whose conditions are already met activate as soon as they
+          // are obtained through Trick.
+          activateStatusBerry(state, attacker);
+          activateStatusBerry(state, target);
+          activateHealingBerry(state, attacker);
+          activateHealingBerry(state, target);
         }
         break;
+      }
       case "destinyBond":
         attacker.volatile.destinyBond = true;
         log(state, `${attacker.name} は相手を道連れにしようとしている！`, "status");
@@ -1170,7 +1198,7 @@
       attacker.lastMoveFailed = true;
       return;
     }
-    if (attacker.choiceLockedMoveId && attacker.choiceLockedMoveId !== move.id && !wasCharging) {
+    if (hasChoiceItem(attacker) && attacker.choiceLockedMoveId && attacker.choiceLockedMoveId !== move.id && !wasCharging) {
       log(state, `${attacker.name} は ${move.name} を選べない！`, "fail");
       attacker.lastMoveFailed = true;
       return;
@@ -1189,7 +1217,7 @@
     attacker.lastMoveId = move.id;
     attacker.lastMoveFailed = false;
     if (!PROTECT_MOVES.has(move.id)) attacker.protectChain = 0;
-    if (heldItem(attacker)?.id === "choice-scarf" && !attacker.choiceLockedMoveId && move.id !== "struggle") attacker.choiceLockedMoveId = move.id;
+    if (hasChoiceItem(attacker) && !attacker.choiceLockedMoveId && move.id !== "struggle") attacker.choiceLockedMoveId = move.id;
     if (heldItem(attacker)?.id === "metronome") {
       if (attacker.metronomeMoveId === move.id) attacker.metronomeCount += 1;
       else {
@@ -1539,7 +1567,7 @@
       id: "struggle", pp: 1, maxPp: 1, disabled: false, requiresSwitchTarget: false,
     }] : mon.moves.map((slot) => ({
       ...slot,
-      disabled: slot.pp <= 0 || Boolean(forcedMoveId && forcedMoveId !== slot.id) || Boolean(mon.choiceLockedMoveId && mon.choiceLockedMoveId !== slot.id) || Boolean(mon.volatile.taunt && DATA.moves[slot.id].categoryId === "status"),
+      disabled: slot.pp <= 0 || Boolean(forcedMoveId && forcedMoveId !== slot.id) || Boolean(hasChoiceItem(mon) && mon.choiceLockedMoveId && mon.choiceLockedMoveId !== slot.id) || Boolean(mon.volatile.taunt && DATA.moves[slot.id].categoryId === "status"),
       requiresSwitchTarget: ["damageThenSwitch", "weatherThenSwitch", "switch"].includes(DATA.moves[slot.id].effect?.kind),
     }));
     return { moves, switches: voluntarySwitches(state, playerIndex), forcedSwitch: false };

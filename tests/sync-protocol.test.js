@@ -11,8 +11,15 @@ const {
   normaliseRoomState,
   playerKeyFromName,
   removePlayerFromRoom,
+  roomHasOnlinePlayers,
   validConfig,
 } = require("../firebase-sync.js");
+const {
+  ROOM_INACTIVITY_MS,
+  roomLastActivityAt,
+  shouldDeleteInactiveRoom,
+  shouldDeleteRoom,
+} = require("../functions/room-cleanup.js");
 
 function firebaseRoundTrip(value) {
   function prune(current) {
@@ -43,8 +50,8 @@ function previewRoomState() {
     commands: {},
     members: { uidOne: true, uidTwo: true },
     players: {
-      one: { id: "one", name: "ONE", ownerUid: "uidOne", joinedAt: 1, party, publicTeam: engine.publicTeam(party) },
-      two: { id: "two", name: "TWO", ownerUid: "uidTwo", joinedAt: 2, party: engine.clone(party), publicTeam: engine.publicTeam(party) },
+      one: { id: "one", name: "ONE", ownerUid: "uidOne", online: true, joinedAt: 1, party, publicTeam: engine.publicTeam(party) },
+      two: { id: "two", name: "TWO", ownerUid: "uidTwo", online: true, joinedAt: 2, party: engine.clone(party), publicTeam: engine.publicTeam(party) },
     },
   };
 }
@@ -143,6 +150,43 @@ test("declining reconnection removes the player and resets the opponent room", (
   assert.deepEqual(Object.keys(remaining.players), ["two"]);
   assert.deepEqual(Object.keys(remaining.members), ["uidTwo"]);
   assert.equal(remaining.players.two.selection, undefined);
+});
+
+test("rooms are deleted only when no player remains online", () => {
+  const room = previewRoomState();
+  room.players.one.online = false;
+  assert.equal(roomHasOnlinePlayers(room), true);
+  assert.equal(shouldDeleteRoom(room), false);
+  room.players.two.online = false;
+  assert.equal(roomHasOnlinePlayers(room), false);
+  assert.equal(shouldDeleteRoom(room), true);
+  assert.equal(removePlayerFromRoom(room, "one"), null);
+});
+
+test("rooms become inactive at 15 minutes and recent player activity is honored", () => {
+  const now = 1_800_000_000_000;
+  const room = previewRoomState();
+  room.createdAt = now - ROOM_INACTIVITY_MS * 2;
+  room.lastActivityAt = now - ROOM_INACTIVITY_MS + 1;
+  room.players.one.lastSeenAt = room.lastActivityAt;
+  room.players.two.lastSeenAt = room.lastActivityAt;
+  assert.equal(shouldDeleteInactiveRoom(room, now), false);
+
+  room.lastActivityAt = now - ROOM_INACTIVITY_MS;
+  room.players.one.lastSeenAt = room.lastActivityAt;
+  room.players.two.lastSeenAt = room.lastActivityAt;
+  assert.equal(shouldDeleteInactiveRoom(room, now), true);
+
+  delete room.lastActivityAt;
+  room.players.two.lastSeenAt = now - 1000;
+  assert.equal(roomLastActivityAt(room), now - 1000);
+  assert.equal(shouldDeleteInactiveRoom(room, now), false);
+});
+
+test("leaving a populated room records activity for the remaining player", () => {
+  const room = previewRoomState();
+  const remaining = removePlayerFromRoom(room, "one", 123456);
+  assert.equal(remaining.lastActivityAt, 123456);
 });
 
 function profileClient(initialProfile = null) {

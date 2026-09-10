@@ -212,7 +212,7 @@
         : "前回の部屋がFirebaseに残っています。続きから復帰するか、この部屋から退出するかを選んでください。";
     elements.reconnectOpponent.textContent = `${roomPhaseLabel(room)}${opponent ? ` ／ 相手: ${opponent.name}` : ""}`;
     message(elements.reconnectMessage, "", true);
-    setReconnectButtonsEnabled(state.connectionOnline);
+    setReconnectButtonsEnabled(state.connectionOnline && reason !== "unverified");
     if (!elements.reconnectDialog.open) {
       if (typeof elements.reconnectDialog.showModal === "function") elements.reconnectDialog.showModal();
       else elements.reconnectDialog.setAttribute("open", "");
@@ -225,13 +225,54 @@
     else elements.reconnectDialog.removeAttribute("open");
   }
 
+  function clearExpiredRoom(roomNumber) {
+    state.pendingReconnect = null;
+    state.roomDisconnected = false;
+    state.room = null;
+    state.roomNumber = null;
+    state.selection = [];
+    state.actionPending = false;
+    state.pendingSwitchMoveId = null;
+    localStorage.removeItem(STORAGE.room);
+    closeReconnectPrompt();
+    setConnection(`${state.playerName}・オンライン`, "online");
+    renderParty();
+    showScreen("team");
+    toast(`ROOM ${roomNumber} は期限切れ、または接続者不在のため削除されました`);
+  }
+
+  async function verifyPendingReconnect() {
+    const pending = state.pendingReconnect;
+    if (!pending || !state.connectionOnline) return;
+    setReconnectButtonsEnabled(false);
+    message(elements.reconnectMessage, "部屋の接続状態を確認しています…", true);
+    try {
+      const savedRoom = await state.client.inspectRoom(pending.roomNumber);
+      if (state.pendingReconnect !== pending) return;
+      const stillParticipant = Boolean(savedRoom?.players?.[state.playerKey]);
+      const hasOnlinePlayers = global.FirebaseRoomProtocol.roomHasOnlinePlayers(savedRoom);
+      if (!savedRoom || !stillParticipant || !hasOnlinePlayers) {
+        if (!savedRoom || !hasOnlinePlayers) {
+          try { await state.client.deleteRoomIfEmpty(pending.roomNumber); } catch { /* Cloud cleanup remains authoritative. */ }
+        }
+        clearExpiredRoom(pending.roomNumber);
+        return;
+      }
+      showReconnectPrompt(pending.roomNumber, savedRoom, pending.reason);
+      setReconnectButtonsEnabled(true);
+      message(elements.reconnectMessage, "相手の接続を確認しました。復帰するか退出するかを選んでください。", true);
+    } catch (error) {
+      setReconnectButtonsEnabled(false);
+      message(elements.reconnectMessage, firebaseFriendlyError(error));
+    }
+  }
+
   function handleConnectionState(connected) {
     state.connectionOnline = connected;
     if (connected) {
       state.connectionSeenOnline = true;
       if (state.pendingReconnect) {
-        setReconnectButtonsEnabled(true);
-        message(elements.reconnectMessage, "通信が復旧しました。復帰するか退出するかを選んでください。", true);
+        void verifyPendingReconnect();
       }
       return;
     }
@@ -360,11 +401,19 @@
       if (previousRoom >= 1 && previousRoom <= 5) {
         try {
           const savedRoom = await state.client.inspectRoom(previousRoom);
-          if (savedRoom?.players?.[state.playerKey]) showReconnectPrompt(previousRoom, savedRoom);
-          else localStorage.removeItem(STORAGE.room);
+          if (!savedRoom?.players?.[state.playerKey]) {
+            localStorage.removeItem(STORAGE.room);
+          } else if (!global.FirebaseRoomProtocol.roomHasOnlinePlayers(savedRoom)) {
+            try { await state.client.deleteRoomIfEmpty(previousRoom); } catch { /* Cloud cleanup remains authoritative. */ }
+            clearExpiredRoom(previousRoom);
+          } else {
+            showReconnectPrompt(previousRoom, savedRoom);
+          }
         } catch (error) {
           cloudLoadError ||= firebaseFriendlyError(error);
           showReconnectPrompt(previousRoom, null, "unverified");
+          setReconnectButtonsEnabled(false);
+          message(elements.reconnectMessage, "部屋の状態を確認できないため復帰できません。通信またはFirebase設定を確認してください。");
         }
       }
       if (cloudLoadError) toast(cloudLoadError);
@@ -554,11 +603,13 @@
 
   function handleRoomState(room) {
     if (!room) {
+      const removedRoomNumber = state.roomNumber;
       state.room = null;
       state.roomNumber = null;
       localStorage.removeItem(STORAGE.room);
       renderRooms();
       showScreen("rooms");
+      if (removedRoomNumber) toast(`ROOM ${removedRoomNumber} は期限切れ、または接続者不在のため終了しました`);
       return;
     }
     state.room = room;
@@ -657,7 +708,9 @@
     const percent = Math.max(0, Math.round(mon.hp / mon.maxHp * 100));
     const hpColor = percent > 50 ? "#82d173" : percent > 20 ? "#ffc857" : "#ed5d68";
     const ability = DATA.abilities[mon.copiedAbilityId || mon.abilityId]?.name || "—";
-    return `<div class="pokemon-name-line"><h3>${escapeHtml(mon.name)}</h3><span>Lv.${mon.level}</span></div><div class="type-tags">${mon.typeIds.map((id) => `<i class="type-tag">${DATA.types[id]}</i>`).join("")}</div><div class="hp-track"><i style="--hp:${percent}%;--hp-color:${hpColor}"></i></div><div class="hp-label"><span>HP</span><b>${own ? `${mon.hp} / ${mon.maxHp}` : `${percent}%`}</b></div><div class="condition-row">${escapeHtml(conditionLabel(mon))} · ${escapeHtml(ability)}</div>`;
+    const ownItem = own ? DATA.items[mon.itemConsumed ? null : mon.itemId]?.name || "なし" : null;
+    const privateDetails = own ? ` · 持ち物 ${escapeHtml(ownItem)}` : "";
+    return `<div class="pokemon-name-line"><h3>${escapeHtml(mon.name)}</h3><span>Lv.${mon.level}</span></div><div class="type-tags">${mon.typeIds.map((id) => `<i class="type-tag">${DATA.types[id]}</i>`).join("")}</div><div class="hp-track"><i style="--hp:${percent}%;--hp-color:${hpColor}"></i></div><div class="hp-label"><span>HP</span><b>${own ? `${mon.hp} / ${mon.maxHp}` : `${percent}%`}</b></div><div class="condition-row">${escapeHtml(conditionLabel(mon))} · ${escapeHtml(ability)}${privateDetails}</div>`;
   }
 
   function renderOrbs(team) {

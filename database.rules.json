@@ -24,7 +24,7 @@
       "$room": {
         ".read": "auth != null && $room.matches(/^[1-5]$/)",
         ".write": "auth != null && $room.matches(/^[1-5]$/) && (!data.exists() || data.child('members').child(auth.uid).val() == true || (newData.exists() && newData.child('members').child(auth.uid).val() == true && newData.child('members').numChildren() <= 2))",
-        ".validate": "!newData.exists() || (newData.hasChildren(['version', 'roomNumber', 'phase', 'players', 'members']) && newData.child('roomNumber').val() >= 1 && newData.child('roomNumber').val() <= 5 && newData.child('players').numChildren() <= 2 && newData.child('members').numChildren() <= 2)"
+        ".validate": "!newData.exists() || (newData.hasChildren(['version', 'roomNumber', 'phase', 'players', 'members', 'lastActivityAt']) && newData.child('roomNumber').val() >= 1 && newData.child('roomNumber').val() <= 5 && newData.child('players').numChildren() <= 2 && newData.child('members').numChildren() <= 2 && newData.child('lastActivityAt').isNumber())"
       }
     }
   }

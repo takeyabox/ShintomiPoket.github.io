@@ -410,7 +410,8 @@
       description: "相手がまだ行動前で攻撃技を選んでいる時だけ成功する。",
     }),
     move("trick", "トリック", "psychic", "status", null, 100, 10, {
-      generation: 3, target: "oneOpponent", effect: { kind: "swapHeldItems" }, description: "自分と相手の持ち物を入れ替える。",
+      generation: 3, target: "oneOpponent", reflectable: false,
+      effect: { kind: "swapHeldItems" }, description: "自分と相手の持ち物を入れ替える。",
     }),
     move("destiny-bond", "みちづれ", "ghost", "status", null, null, 5, {
       generation: 2, effect: { kind: "destinyBond", untilNextAction: true, consecutiveUseFails: true },
