@@ -22,9 +22,31 @@ function battleWith(teamA, teamB, seed = 12345) {
 
 test("master data and default party are valid", () => {
   assert.equal(GAME_DATA.pokemonList.length, 6);
-  assert.equal(GAME_DATA.moveList.length, 99);
+  assert.equal(GAME_DATA.moveList.length, 102);
   assert.equal(GAME_DATA.itemList.length, 79);
   assert.deepEqual(engine.validateParty(engine.createDefaultParty()), []);
+});
+
+test("effort points add level-50 stat values with a total budget of 66", () => {
+  const build = engine.createDefaultParty()[0];
+  const base = engine.calculateStats(build.speciesId, build);
+  build.effortPoints = { hp: 32, attack: 32, defense: 0, specialAttack: 0, specialDefense: 0, speed: 2 };
+  const trained = engine.calculateStats(build.speciesId, build);
+  assert.equal(trained.hp - base.hp, 32);
+  assert.equal(trained.attack - base.attack, 32);
+  assert.equal(trained.speed - base.speed, 2);
+  assert.deepEqual(engine.validateParty([build], { requireFullParty: false }), []);
+  build.effortPoints.speed = 3;
+  assert.match(engine.validateParty([build], { requireFullParty: false }).join(" "), /合計が66を超えています/);
+});
+
+test("legacy 0-252 EV saves migrate to effort-point values", () => {
+  const legacy = engine.createDefaultParty()[0];
+  delete legacy.effortPoints;
+  legacy.evs = { hp: 252, attack: 252, defense: 4, specialAttack: 0, specialDefense: 0, speed: 0 };
+  const migrated = engine.migrateParty([legacy])[0];
+  assert.deepEqual(migrated.effortPoints, { hp: 32, attack: 32, defense: 1, specialAttack: 0, specialDefense: 0, speed: 0 });
+  assert.equal("evs" in migrated, false);
 });
 
 test("stat and type calculations follow level 50 rules", () => {
@@ -97,15 +119,52 @@ test("fainted active Pokemon requires and accepts a replacement", () => {
   assert.equal(next.players[0].active, 1);
 });
 
+test("Roar and Dragon Tail force a deterministic random opponent switch", () => {
+  const [teamA, teamB] = defaultTeams();
+  const makeState = (moveId) => {
+    const state = battleWith(teamA, teamB, 12345);
+    state.players[0].team[0].moves = [{ id: moveId, pp: 10, maxPp: 10 }];
+    state.players[1].team[0].moves = [{ id: "celebrate", pp: 40, maxPp: 40 }];
+    return state;
+  };
+  const commands = (moveId) => ({
+    "player-a": { type: "move", moveId, opponentSwitchPreference: 1 },
+    "player-b": { type: "move", moveId: "celebrate", switchPreference: 1 },
+  });
+  const roarResult = engine.resolveTurn(makeState("roar"), commands("roar"));
+  assert.equal(roarResult.players[1].active, 2, "the opponent's preferred index must not control Roar");
+  assert.deepEqual(roarResult, engine.resolveTurn(makeState("roar"), commands("roar")));
+  const tailResult = engine.resolveTurn(makeState("dragon-tail"), commands("dragon-tail"));
+  assert.notEqual(tailResult.players[1].active, 0);
+});
+
+test("pivot moves use the explicitly selected normal-switch destination", () => {
+  const [teamA, teamB] = defaultTeams();
+  teamA[0] = { ...teamA[0], moveIds: ["flip-turn"] };
+  teamB[0] = { ...teamB[0], moveIds: ["splash"] };
+  const state = battleWith(teamA, teamB, 8765);
+  assert.throws(() => engine.resolveTurn(state, {
+    "player-a": { type: "move", moveId: "flip-turn" },
+    "player-b": { type: "move", moveId: "splash" },
+  }), /交代するポケモンを指定してください/);
+  const next = engine.resolveTurn(state, {
+    "player-a": { type: "move", moveId: "flip-turn", switchTo: 2 },
+    "player-b": { type: "move", moveId: "splash" },
+  });
+  assert.equal(next.players[0].active, 2);
+});
+
 test("every configured move effect can execute without corrupting state", () => {
   const defaults = engine.createDefaultParty();
   for (const move of GAME_DATA.moveList) {
     const ownerIndex = GAME_DATA.pokemonList.findIndex((species) => species.moveIds.includes(move.id));
-    const order = [ownerIndex, ...defaults.map((_, index) => index).filter((index) => index !== ownerIndex)].slice(0, 3);
-    const teamA = order.map((index, slot) => ({ ...defaults[index], moveIds: slot === 0 ? [move.id] : defaults[index].moveIds }));
+    const testOwnerIndex = ownerIndex >= 0 ? ownerIndex : 0;
+    const order = [testOwnerIndex, ...defaults.map((_, index) => index).filter((index) => index !== testOwnerIndex)].slice(0, 3);
+    const teamA = order.map((index, slot) => ({ ...defaults[index], moveIds: slot === 0 && ownerIndex >= 0 ? [move.id] : defaults[index].moveIds }));
     const otherOrder = defaults.map((_, index) => index).filter((index) => !order.includes(index)).concat(order).slice(0, 3);
     const teamB = otherOrder.map((index) => defaults[index]);
     const state = battleWith(teamA, teamB, 2468);
+    if (ownerIndex < 0) state.players[0].team[0].moves = [{ id: move.id, pp: move.pp, maxPp: move.pp }];
     assert.doesNotThrow(() => engine.resolveTurn(state, {
       "player-a": { type: "move", moveId: move.id, switchTo: 1, switchPreference: 1, opponentSwitchPreference: 1 },
       "player-b": { type: "move", moveId: teamB[0].moveIds[0], switchTo: 1, switchPreference: 1, opponentSwitchPreference: 1 },

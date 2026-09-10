@@ -16,7 +16,7 @@
   <meta name="twitter:description" content="6体を組み、3体を選ぶ。2デバイス同期型オンラインシングルバトル。">
   <meta name="twitter:image" content="https://takeyabox.github.io/ShintomiPoket.github.io/public/og.png">
   <title>Shintomi Poket — Online Battle</title>
-  <link rel="stylesheet" href="style.css?v=20260910">
+  <link rel="stylesheet" href="style.css?v=20260910-3">
 </head>
 <body>
   <header class="site-header">
@@ -78,7 +78,7 @@
         <div><p class="eyebrow">TEAM BUILDER</p><h2 id="teamTitle">6体の戦い方を決める</h2></div>
         <div class="heading-actions"><button class="ghost-button" id="resetPartyButton" type="button">初期化</button><button class="primary-button compact" id="toRoomsButton" type="button">編成を保存して次へ</button></div>
       </div>
-      <div class="rules-strip"><span>Lv.50</span><span>技 1〜4個</span><span>努力値 合計510</span><span>同じ持ち物は不可</span></div>
+      <div class="rules-strip"><span>Lv.50</span><span>技 1〜4個</span><span>努力値 実数値66</span><span>1能力 最大32</span><span>同じ持ち物は不可</span></div>
       <div class="party-grid" id="partyGrid"></div>
       <p class="form-message sticky-message" id="partyMessage" role="alert"></p>
     </section>
@@ -147,13 +147,25 @@
     </section>
   </main>
 
+  <dialog class="reconnect-dialog panel" id="reconnectDialog" aria-labelledby="reconnectTitle" aria-describedby="reconnectDescription">
+    <p class="eyebrow">CONNECTION RECOVERY</p>
+    <h2 id="reconnectTitle">部屋に復帰しますか？</h2>
+    <p id="reconnectDescription">Firebaseに保存された対戦状態が見つかりました。</p>
+    <div class="reconnect-room-state" id="reconnectOpponent"></div>
+    <div class="reconnect-actions">
+      <button class="primary-button compact" id="reconnectButton" type="button">部屋に復帰する</button>
+      <button class="secondary-button" id="discardReconnectButton" type="button">復帰せず部屋を出る</button>
+    </div>
+    <p class="form-message" id="reconnectMessage" role="status"></p>
+  </dialog>
+
   <template id="pokemonCardTemplate"></template>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="data.js?v=20260910"></script>
-  <script src="battle-engine.js?v=20260910"></script>
-  <script src="firebase-config.js?v=20260910"></script>
-  <script src="firebase-sync.js?v=20260910"></script>
-  <script src="main.js?v=20260910"></script>
+  <script src="data.js?v=20260910-3"></script>
+  <script src="battle-engine.js?v=20260910-3"></script>
+  <script src="firebase-config.js?v=20260910-3"></script>
+  <script src="firebase-sync.js?v=20260910-3"></script>
+  <script src="main.js?v=20260910-3"></script>
 </body>
 </html>

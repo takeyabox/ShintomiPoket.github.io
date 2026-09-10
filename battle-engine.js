@@ -62,12 +62,40 @@
     return 1;
   }
 
+  function legacyEvToEffortPoint(value) {
+    const ev = clamp(Math.floor(Number(value) || 0), 0, DATA.battleRules.maxEvPerStat);
+    return ev <= 0 ? 0 : Math.min(DATA.battleRules.maxEffortPointsPerStat, Math.floor((ev + 4) / 8));
+  }
+
+  function effortPointToEv(value) {
+    const point = clamp(Math.floor(Number(value) || 0), 0, DATA.battleRules.maxEffortPointsPerStat);
+    return point <= 0 ? 0 : Math.min(DATA.battleRules.maxEvPerStat, 4 + (point - 1) * 8);
+  }
+
+  function effortPointsForBuild(build = {}) {
+    if (build.effortPoints && typeof build.effortPoints === "object") {
+      return Object.fromEntries(STAT_KEYS.map((stat) => [stat, build.effortPoints[stat] ?? 0]));
+    }
+    return Object.fromEntries(STAT_KEYS.map((stat) => [stat, legacyEvToEffortPoint(build.evs?.[stat])]));
+  }
+
+  function migrateParty(party) {
+    if (!Array.isArray(party)) return party;
+    return party.map((build) => {
+      const migrated = clone(build);
+      migrated.effortPoints = effortPointsForBuild(build);
+      delete migrated.evs;
+      return migrated;
+    });
+  }
+
   function calculateStats(speciesId, build = {}) {
     const species = DATA.pokemon[speciesId];
     if (!species) throw new Error(`不明なポケモンIDです: ${speciesId}`);
     const level = build.level || DATA.battleRules.level;
     const nature = DATA.natures[build.natureId] || DATA.natures.serious;
-    const evs = Object.fromEntries(STAT_KEYS.map((stat) => [stat, clamp(Number(build.evs?.[stat]) || 0, 0, 252)]));
+    const effortPoints = effortPointsForBuild(build);
+    const evs = Object.fromEntries(STAT_KEYS.map((stat) => [stat, effortPointToEv(effortPoints[stat])]));
     const ivs = Object.fromEntries(STAT_KEYS.map((stat) => [stat, clamp(Number(build.ivs?.[stat] ?? 31), 0, 31)]));
     const stats = {};
     for (const stat of STAT_KEYS) {
@@ -94,7 +122,7 @@
       abilityId: DATA.abilitiesByName[species.abilities[0]]?.id || null,
       itemId: null,
       moveIds: [...new Set(species.moveIds)].slice(0, DATA.battleRules.movesPerPokemon),
-      evs: Object.fromEntries(STAT_KEYS.map((stat) => [stat, 0])),
+      effortPoints: Object.fromEntries(STAT_KEYS.map((stat) => [stat, 0])),
       ivs: Object.fromEntries(STAT_KEYS.map((stat) => [stat, DATA.battleRules.defaultIv])),
     }));
   }
@@ -131,12 +159,13 @@
       for (const moveId of moveIds) {
         if (!DATA.moves[moveId] || !species.moveIds.includes(moveId)) errors.push(`${label}: 覚えられない技「${moveId}」があります。`);
       }
-      const totalEv = STAT_KEYS.reduce((sum, stat) => {
-        const ev = Number(build.evs?.[stat]);
-        if (!Number.isInteger(ev) || ev < 0 || ev > DATA.battleRules.maxEvPerStat) errors.push(`${label}: ${stat}の努力値が不正です。`);
-        return sum + (Number.isFinite(ev) ? ev : 0);
+      const effortPoints = effortPointsForBuild(build);
+      const totalEffortPoints = STAT_KEYS.reduce((sum, stat) => {
+        const point = Number(effortPoints[stat]);
+        if (!Number.isInteger(point) || point < 0 || point > DATA.battleRules.maxEffortPointsPerStat) errors.push(`${label}: ${stat}の努力値実数が不正です。`);
+        return sum + (Number.isFinite(point) ? point : 0);
       }, 0);
-      if (totalEv > DATA.battleRules.maxTotalEv) errors.push(`${label}: 努力値の合計が510を超えています。`);
+      if (totalEffortPoints > DATA.battleRules.maxTotalEffortPoints) errors.push(`${label}: 努力値実数の合計が66を超えています。`);
     });
     return [...new Set(errors)];
   }
@@ -367,6 +396,11 @@
       .map((mon, index) => ({ mon, index }))
       .filter(({ mon, index }) => index !== state.players[playerIndex].active && !mon.fainted && mon.hp > 0)
       .map(({ index }) => index);
+  }
+
+  function voluntarySwitches(state, playerIndex) {
+    const mon = active(state, playerIndex);
+    return mon.volatile.trapped && heldItem(mon)?.id !== "shed-shell" ? [] : availableSwitches(state, playerIndex);
   }
 
   function applyEntryHazards(state, playerIndex, mon) {
@@ -707,6 +741,18 @@
     return choices.includes(Number(preferred)) ? Number(preferred) : choices[0];
   }
 
+  function chooseRequestedSwitch(state, playerIndex, requested) {
+    const choices = availableSwitches(state, playerIndex);
+    return choices.includes(Number(requested)) ? Number(requested) : null;
+  }
+
+  function forceRandomSwitch(state, playerIndex) {
+    const choices = availableSwitches(state, playerIndex);
+    if (!choices.length) return false;
+    const replacement = choices[randomInt(state, 0, choices.length - 1)];
+    return switchPokemon(state, playerIndex, replacement);
+  }
+
   function applyContactItems(state, attacker, target, move, action) {
     if (!move.flags.contact || attacker.fainted) return;
     if (heldItem(target)?.id === "rocky-helmet") dealDirectDamage(state, attacker, Math.floor(attacker.maxHp / 6), "ゴツゴツメット");
@@ -770,7 +816,7 @@
       log(state, `${attacker.name} は自分側の設置物を吹き飛ばした！`, "hazard");
     }
     if (effect.kind === "damageThenSwitch" && !attacker.fainted) {
-      const replacement = chooseFallbackSwitch(state, action.playerIndex, action.switchTo);
+      const replacement = chooseRequestedSwitch(state, action.playerIndex, action.switchTo);
       if (replacement != null) switchPokemon(state, action.playerIndex, replacement);
     }
     if (effect.kind === "flingHeldItem") {
@@ -904,6 +950,12 @@
         log(state, `${state.players[targetIndex].name} の場に${move.name}が設置された！`, "hazard");
         break;
       }
+      case "forceRandomSwitch":
+        if (!forceRandomSwitch(state, targetIndex)) {
+          attacker.lastMoveFailed = true;
+          log(state, "しかし、うまく決まらなかった！", "fail");
+        }
+        break;
       case "weather": {
         const weatherItem = heldItem(attacker);
         const extended = (move.id === "rain-dance" && weatherItem?.id === "damp-rock");
@@ -931,7 +983,7 @@
         break;
       }
       case "switch": {
-        const replacement = chooseFallbackSwitch(state, attackerIndex, action.switchTo);
+        const replacement = chooseRequestedSwitch(state, attackerIndex, action.switchTo);
         if (replacement == null) log(state, "交代できるポケモンがいない！", "fail");
         else switchPokemon(state, attackerIndex, replacement, { pass: effect.passStagesAndVolatiles });
         break;
@@ -978,7 +1030,7 @@
       case "weatherThenSwitch": {
         const turns = heldItem(attacker)?.id === "icy-rock" ? 8 : effect.turns;
         setWeather(state, effect.weather, turns, attacker);
-        const replacement = chooseFallbackSwitch(state, attackerIndex, action.switchTo);
+        const replacement = chooseRequestedSwitch(state, attackerIndex, action.switchTo);
         if (replacement != null) switchPokemon(state, attackerIndex, replacement);
         break;
       }
@@ -1259,6 +1311,9 @@
     const targetSwitchPreference = state._turnActions?.[state.players[targetIndex].id]?.switchPreference;
     applyPostHitItemSwitch(state, targetIndex, target, targetSwitchPreference);
     applyLifeOrb(state, attacker, result.damage > 0);
+    if (move.effect?.kind === "damageAndForceRandomSwitch" && !target.fainted && !result.toSubstitute && active(state, targetIndex).uid === target.uid) {
+      forceRandomSwitch(state, targetIndex);
+    }
     if (move.id === "struggle" && !attacker.fainted) dealDirectDamage(state, attacker, Math.floor(attacker.maxHp / 4), "わるあがきの反動");
     if (attacker.volatile.charge && move.typeId === "electric") delete attacker.volatile.charge;
     if (move.effect?.kind === "lockedEscalatingDamage") {
@@ -1291,7 +1346,6 @@
       moveId,
       switchTo: rawAction?.switchTo == null ? null : Number(rawAction.switchTo),
       switchPreference: rawAction?.switchPreference == null ? null : Number(rawAction.switchPreference),
-      opponentSwitchPreference: rawAction?.opponentSwitchPreference == null ? null : Number(rawAction.opponentSwitchPreference),
       playerIndex,
       actorUid: mon.uid,
     };
@@ -1307,7 +1361,8 @@
     const selected = selectedMoveForAction(mon, action);
     if (!selected) return "使用できない技です。";
     const needsSwitchTarget = ["damageThenSwitch", "weatherThenSwitch", "switch"].includes(selected.effect?.kind);
-    if (needsSwitchTarget && availableSwitches(state, playerIndex).length && !availableSwitches(state, playerIndex).includes(Number(action.switchTo))) {
+    const switchTargets = voluntarySwitches(state, playerIndex);
+    if (needsSwitchTarget && switchTargets.length && !switchTargets.includes(Number(action.switchTo))) {
       return `${selected.name}で交代するポケモンを指定してください。`;
     }
     return null;
@@ -1487,7 +1542,7 @@
       disabled: slot.pp <= 0 || Boolean(forcedMoveId && forcedMoveId !== slot.id) || Boolean(mon.choiceLockedMoveId && mon.choiceLockedMoveId !== slot.id) || Boolean(mon.volatile.taunt && DATA.moves[slot.id].categoryId === "status"),
       requiresSwitchTarget: ["damageThenSwitch", "weatherThenSwitch", "switch"].includes(DATA.moves[slot.id].effect?.kind),
     }));
-    return { moves, switches: mon.volatile.trapped && heldItem(mon)?.id !== "shed-shell" ? [] : switches, forcedSwitch: false };
+    return { moves, switches: voluntarySwitches(state, playerIndex), forcedSwitch: false };
   }
 
   function publicTeam(party) {
@@ -1498,11 +1553,15 @@
   }
 
   const BattleEngine = Object.freeze({
-    version: 1,
+    version: 2,
     STAT_KEYS: Object.freeze([...STAT_KEYS]),
     hashString,
     calculateStats,
     createDefaultParty,
+    migrateParty,
+    effortPointsForBuild,
+    effortPointToEv,
+    legacyEvToEffortPoint,
     validateParty,
     createBattle,
     resolveTurn,

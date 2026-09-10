@@ -28,9 +28,14 @@
     selection: [],
     actionPending: false,
     commandTab: "moves",
+    pendingSwitchMoveId: null,
     toastTimer: null,
     cloudBusy: false,
     cloudDirty: false,
+    pendingReconnect: null,
+    connectionOnline: false,
+    connectionSeenOnline: false,
+    roomDisconnected: false,
   };
 
   const elements = Object.fromEntries([
@@ -42,6 +47,7 @@
     "clearSelectionButton", "submitSelectionButton", "previewMessage", "opponentName", "myName", "opponentOrbs", "playerOrbs",
     "opponentStatus", "playerStatus", "fieldEffects", "turnNumber", "battleSyncState", "commandPanel", "battleLog", "battleMessage",
     "leaveBattleButton", "resultEmblem", "resultTitle", "resultDescription", "rematchButton", "leaveResultButton", "resultMessage",
+    "reconnectDialog", "reconnectTitle", "reconnectDescription", "reconnectOpponent", "reconnectButton", "discardReconnectButton", "reconnectMessage",
     "homeButton", "toast",
   ].map((id) => [id, document.getElementById(id)]));
 
@@ -55,8 +61,9 @@
 
   function loadParty() {
     const saved = safeJsonParse(localStorage.getItem(STORAGE.party), null);
-    if (!saved || ENGINE.validateParty(saved).length) return ENGINE.createDefaultParty();
-    return saved;
+    const migrated = ENGINE.migrateParty(saved);
+    if (!migrated || ENGINE.validateParty(migrated).length) return ENGINE.createDefaultParty();
+    return migrated;
   }
 
   function saveParty() {
@@ -181,6 +188,116 @@
     state.toastTimer = setTimeout(() => elements.toast.classList.remove("show"), 2400);
   }
 
+  function roomPhaseLabel(room) {
+    if (room?.phase === "battle") return `ターン ${room.battle?.turn || 1}・対戦中`;
+    if (room?.phase === "result") return "対戦結果";
+    if (room?.phase === "teamPreview") return "3体選出中";
+    return "対戦相手を待機中";
+  }
+
+  function setReconnectButtonsEnabled(enabled) {
+    elements.reconnectButton.disabled = !enabled;
+    elements.discardReconnectButton.disabled = !enabled;
+    if (!enabled) message(elements.reconnectMessage, "通信が戻ると選択できます。");
+  }
+
+  function showReconnectPrompt(roomNumber, room, reason = "saved") {
+    const opponent = Object.values(room?.players || {}).find((player) => player.id !== state.playerKey);
+    state.pendingReconnect = { roomNumber: Number(roomNumber), room, reason };
+    elements.reconnectTitle.textContent = `ROOM ${roomNumber} に復帰しますか？`;
+    elements.reconnectDescription.textContent = reason === "disconnect"
+      ? "通信が切断されました。Firebaseに保存された対戦状態へ復帰するか、この部屋から退出するかを選んでください。"
+      : reason === "unverified"
+        ? "前回の部屋情報を確認できませんでした。再接続を試すか、この端末の復帰情報を破棄するかを選んでください。"
+        : "前回の部屋がFirebaseに残っています。続きから復帰するか、この部屋から退出するかを選んでください。";
+    elements.reconnectOpponent.textContent = `${roomPhaseLabel(room)}${opponent ? ` ／ 相手: ${opponent.name}` : ""}`;
+    message(elements.reconnectMessage, "", true);
+    setReconnectButtonsEnabled(state.connectionOnline);
+    if (!elements.reconnectDialog.open) {
+      if (typeof elements.reconnectDialog.showModal === "function") elements.reconnectDialog.showModal();
+      else elements.reconnectDialog.setAttribute("open", "");
+    }
+  }
+
+  function closeReconnectPrompt() {
+    if (!elements.reconnectDialog.open) return;
+    if (typeof elements.reconnectDialog.close === "function") elements.reconnectDialog.close();
+    else elements.reconnectDialog.removeAttribute("open");
+  }
+
+  function handleConnectionState(connected) {
+    state.connectionOnline = connected;
+    if (connected) {
+      state.connectionSeenOnline = true;
+      if (state.pendingReconnect) {
+        setReconnectButtonsEnabled(true);
+        message(elements.reconnectMessage, "通信が復旧しました。復帰するか退出するかを選んでください。", true);
+      }
+      return;
+    }
+    if (state.pendingReconnect) {
+      setReconnectButtonsEnabled(false);
+      return;
+    }
+    if (!state.connectionSeenOnline || state.localMode || !state.roomNumber || !state.room) return;
+    state.roomDisconnected = true;
+    state.client?.pauseSubscription();
+    setConnection(`ROOM ${state.roomNumber}・通信切断`, "error");
+    showReconnectPrompt(state.roomNumber, state.room, "disconnect");
+  }
+
+  function startConnectionMonitor() {
+    state.connectionOnline = false;
+    state.connectionSeenOnline = false;
+    state.client.monitorConnection(handleConnectionState, (error) => {
+      setConnection("接続状態を確認できません", "error");
+      toast(firebaseFriendlyError(error));
+    });
+  }
+
+  async function reconnectToRoom() {
+    if (!state.pendingReconnect || !state.connectionOnline) return;
+    const pending = state.pendingReconnect;
+    setReconnectButtonsEnabled(false);
+    message(elements.reconnectMessage, "部屋へ復帰しています…", true);
+    try {
+      await joinRoom(pending.roomNumber);
+      state.pendingReconnect = null;
+      state.roomDisconnected = false;
+      closeReconnectPrompt();
+      toast(`ROOM ${pending.roomNumber} に復帰しました`);
+    } catch (error) {
+      setReconnectButtonsEnabled(state.connectionOnline);
+      message(elements.reconnectMessage, firebaseFriendlyError(error));
+    }
+  }
+
+  async function discardReconnect() {
+    if (!state.pendingReconnect || !state.connectionOnline) return;
+    const pending = state.pendingReconnect;
+    setReconnectButtonsEnabled(false);
+    message(elements.reconnectMessage, "部屋から退出しています…", true);
+    try {
+      await state.client.abandonRoom(pending.roomNumber, state.party);
+      state.pendingReconnect = null;
+      state.roomDisconnected = false;
+      state.room = null;
+      state.roomNumber = null;
+      state.selection = [];
+      state.actionPending = false;
+      state.pendingSwitchMoveId = null;
+      localStorage.removeItem(STORAGE.room);
+      closeReconnectPrompt();
+      setConnection(`${state.playerName}・オンライン`, "online");
+      renderParty();
+      showScreen("team");
+      toast(`ROOM ${pending.roomNumber} から退出しました`);
+    } catch (error) {
+      setReconnectButtonsEnabled(state.connectionOnline);
+      message(elements.reconnectMessage, firebaseFriendlyError(error));
+    }
+  }
+
   function option(value, label, selected = false) {
     return `<option value="${escapeHtml(value)}"${selected ? " selected" : ""}>${escapeHtml(label)}</option>`;
   }
@@ -230,6 +347,7 @@
       localStorage.setItem(STORAGE.firebase, JSON.stringify(config));
       setConnection(`${state.playerName}・オンライン`, "online");
       showCloudControls(true);
+      startConnectionMonitor();
       let cloudLoadError = null;
       try {
         await loadPartyFromFirebase({ automatic: true });
@@ -237,17 +355,18 @@
         cloudLoadError = firebaseFriendlyError(error);
       }
       const previousRoom = Number(localStorage.getItem(STORAGE.room));
-      if (previousRoom >= 1 && previousRoom <= 5) {
-        try {
-          await joinRoom(previousRoom);
-          toast(cloudLoadError || `ルーム ${previousRoom} に復帰しました`);
-          return;
-        } catch {
-          localStorage.removeItem(STORAGE.room);
-        }
-      }
       renderParty();
       showScreen("team");
+      if (previousRoom >= 1 && previousRoom <= 5) {
+        try {
+          const savedRoom = await state.client.inspectRoom(previousRoom);
+          if (savedRoom?.players?.[state.playerKey]) showReconnectPrompt(previousRoom, savedRoom);
+          else localStorage.removeItem(STORAGE.room);
+        } catch (error) {
+          cloudLoadError ||= firebaseFriendlyError(error);
+          showReconnectPrompt(previousRoom, null, "unverified");
+        }
+      }
       if (cloudLoadError) toast(cloudLoadError);
     } catch (error) {
       state.client = null;
@@ -304,15 +423,16 @@
         const move = DATA.moves[id];
         return option(id, `${move.name}｜${move.type} ${move.category}`, id === selected);
       }).join("")}</select></label>`).join("");
-      const evInputs = ENGINE.STAT_KEYS.map((stat) => `<label>${STAT_LABELS[stat]}<input class="ev-input" data-index="${index}" data-stat="${stat}" type="number" min="0" max="252" step="4" value="${Number(build.evs?.[stat]) || 0}" inputmode="numeric"></label>`).join("");
-      const totalEv = Object.values(build.evs || {}).reduce((sum, value) => sum + (Number(value) || 0), 0);
+      const effortPoints = ENGINE.effortPointsForBuild(build);
+      const evInputs = ENGINE.STAT_KEYS.map((stat) => `<label>${STAT_LABELS[stat]}<input class="ev-input" data-index="${index}" data-stat="${stat}" type="number" min="0" max="${DATA.battleRules.maxEffortPointsPerStat}" step="1" value="${Number(effortPoints[stat]) || 0}" inputmode="numeric"></label>`).join("");
+      const totalEv = Object.values(effortPoints).reduce((sum, value) => sum + (Number(value) || 0), 0);
       return `<details class="party-card panel" data-index="${index}"${index === 0 ? " open" : ""}>
         <summary><span class="species-number">0${index + 1}</span><span class="species-icon" style="--type-color:${TYPE_COLORS[species.typeIds[0]]}">${escapeHtml(species.name.split(" ")[0].slice(0, 1))}</span><span class="species-title"><strong>${escapeHtml(species.name)}</strong><span class="type-tags">${species.types.map((type) => `<i class="type-tag">${type}</i>`).join("")}</span></span></summary>
         <div class="party-editor">
           <div class="editor-row"><label>性格<select class="nature-select" data-index="${index}">${natureOptions}</select></label><label>特性<select class="ability-select" data-index="${index}">${abilityOptions}</select></label><label>持ち物<select class="item-select" data-index="${index}">${itemOptions}</select></label></div>
           <div class="moves-editor"><strong>MOVES</strong>${moveSelectors}</div>
-          <div class="ev-editor"><strong>EFFORT VALUES</strong>${evInputs}</div>
-          <div class="stat-preview" id="statPreview${index}">${statPreview(build)}<span class="ev-total">EV <b id="evTotal${index}">${totalEv}</b> / 510</span></div>
+          <div class="ev-editor"><strong>EFFORT POINTS｜実数値</strong>${evInputs}</div>
+          <div class="stat-preview" id="statPreview${index}">${statPreview(build)}<span class="ev-total">実数値 <b id="evTotal${index}">${totalEv}</b> / ${DATA.battleRules.maxTotalEffortPoints}</span></div>
         </div>
       </details>`;
     }).join("");
@@ -326,15 +446,25 @@
     if (control.classList.contains("nature-select")) build.natureId = control.value;
     if (control.classList.contains("ability-select")) build.abilityId = control.value;
     if (control.classList.contains("item-select")) build.itemId = control.value || null;
-    if (control.classList.contains("ev-input")) build.evs[control.dataset.stat] = clampNumber(control.value, 0, 252);
+    let effortLimitReached = false;
+    if (control.classList.contains("ev-input")) {
+      build.effortPoints ||= ENGINE.effortPointsForBuild(build);
+      const stat = control.dataset.stat;
+      const requested = clampNumber(control.value, 0, DATA.battleRules.maxEffortPointsPerStat);
+      const otherTotal = ENGINE.STAT_KEYS.reduce((sum, key) => sum + (key === stat ? 0 : Number(build.effortPoints[key]) || 0), 0);
+      const available = Math.max(0, DATA.battleRules.maxTotalEffortPoints - otherTotal);
+      build.effortPoints[stat] = Math.min(requested, available);
+      control.value = build.effortPoints[stat];
+      effortLimitReached = build.effortPoints[stat] !== requested;
+    }
     if (control.classList.contains("move-select")) {
       const card = control.closest(".party-card");
       build.moveIds = [...card.querySelectorAll(".move-select")].map((select) => select.value).filter(Boolean);
     }
     const preview = document.getElementById(`statPreview${index}`);
-    const totalEv = Object.values(build.evs).reduce((sum, value) => sum + Number(value || 0), 0);
-    if (preview) preview.innerHTML = `${statPreview(build)}<span class="ev-total">EV <b id="evTotal${index}">${totalEv}</b> / 510</span>`;
-    message(elements.partyMessage, totalEv > 510 ? `${DATA.pokemon[build.speciesId].name}の努力値合計が510を超えています。` : "");
+    const totalEv = Object.values(ENGINE.effortPointsForBuild(build)).reduce((sum, value) => sum + Number(value || 0), 0);
+    if (preview) preview.innerHTML = `${statPreview(build)}<span class="ev-total">実数値 <b id="evTotal${index}">${totalEv}</b> / ${DATA.battleRules.maxTotalEffortPoints}</span>`;
+    message(elements.partyMessage, effortLimitReached ? `努力値実数は合計${DATA.battleRules.maxTotalEffortPoints}までです。残りポイントに合わせて調整しました。` : "");
     saveParty();
     markPartyDirty();
   }
@@ -382,12 +512,16 @@
       startLocalPreview(roomNumber);
       return;
     }
-    await state.client.join(roomNumber, state.party);
+    const joinedRoom = await state.client.join(roomNumber, state.party);
     state.roomNumber = Number(roomNumber);
     localStorage.setItem(STORAGE.room, String(roomNumber));
+    handleRoomState(joinedRoom);
     state.client.subscribe(handleRoomState, (error) => {
       setConnection("同期エラー", "error");
-      message(elements.battleMessage, firebaseFriendlyError(error));
+      const target = state.screen === "preview" ? elements.previewMessage
+        : state.screen === "rooms" ? elements.roomMessage
+          : elements.battleMessage;
+      message(target, firebaseFriendlyError(error));
     });
   }
 
@@ -440,6 +574,7 @@
       return;
     }
     if (room.phase === "teamPreview") {
+      state.pendingSwitchMoveId = null;
       state.selection = room.players[state.playerKey]?.selection ? [...room.players[state.playerKey].selection] : [];
       renderPreview();
       showScreen("preview");
@@ -576,9 +711,17 @@
       return;
     }
     const switches = legal.switches.map((index) => ({ index, mon: mine.team[index] }));
-    const switchOptions = switches.map(({ index, mon }) => option(index, `${mon.name}（HP ${mon.hp}/${mon.maxHp}）`)).join("");
+    const switchButtons = (mode = "normal") => switches.map(({ index, mon }) => `<button class="switch-button" ${mode === "pivot" ? "data-action-pivot-switch" : "data-action-switch"}="${index}" type="button"><strong>${escapeHtml(mon.name)}</strong><span class="move-meta"><span>${mon.typeIds.map((id) => DATA.types[id]).join(" / ")}</span><span>HP ${mon.hp}/${mon.maxHp}</span></span></button>`).join("");
     if (legal.forcedSwitch) {
-      elements.commandPanel.innerHTML = `<div class="command-title"><span>交代するポケモン</span><span>SWITCH</span></div><div class="switch-list">${switches.map(({ index, mon }) => `<button class="switch-button" data-action-switch="${index}" type="button"><strong>${escapeHtml(mon.name)}</strong><span class="move-meta"><span>${mon.typeIds.map((id) => DATA.types[id]).join(" / ")}</span><span>HP ${mon.hp}/${mon.maxHp}</span></span></button>`).join("")}</div>`;
+      elements.commandPanel.innerHTML = `<div class="command-title"><span>交代するポケモン</span><span>SWITCH</span></div><div class="switch-list">${switchButtons()}</div>`;
+      bindCommandButtons();
+      return;
+    }
+    const pendingMove = legal.moves.find((slot) => slot.id === state.pendingSwitchMoveId && slot.requiresSwitchTarget && !slot.disabled);
+    if (state.pendingSwitchMoveId && !pendingMove) state.pendingSwitchMoveId = null;
+    if (pendingMove && switches.length) {
+      const move = DATA.moves[pendingMove.id];
+      elements.commandPanel.innerHTML = `<div class="command-title switch-choice-title"><span>${escapeHtml(move.name)}の交代先</span><button class="text-button" data-cancel-pivot type="button">技選択に戻る</button></div><div class="switch-list">${switchButtons("pivot")}</div>`;
       bindCommandButtons();
       return;
     }
@@ -586,19 +729,33 @@
       const move = DATA.moves[slot.id] || { name: "わるあがき", type: "ノーマル", category: "物理", typeId: "normal", power: 50 };
       return `<button class="move-button" style="--move-color:${TYPE_COLORS[move.typeId]}" data-action-move="${slot.id}" type="button"${slot.disabled ? " disabled" : ""}><strong>${escapeHtml(move.name)}</strong><span class="move-meta"><span>${move.type}・${move.category}</span><span>PP ${slot.pp}/${slot.maxPp}</span></span></button>`;
     }).join("");
-    const switchButtons = switches.map(({ index, mon }) => `<button class="switch-button" data-action-switch="${index}" type="button"><strong>${escapeHtml(mon.name)}</strong><span class="move-meta"><span>${mon.typeIds.map((id) => DATA.types[id]).join(" / ")}</span><span>HP ${mon.hp}/${mon.maxHp}</span></span></button>`).join("");
-    elements.commandPanel.innerHTML = `<div class="command-title"><span>${state.commandTab === "moves" ? "技を選ぶ" : "交代する"}</span><span>${escapeHtml(mine.team[mine.active].name)}</span></div>${switches.length ? `<div class="pivot-select"><label>交代技・緊急交代の行き先<select id="switchPreference">${switchOptions}</select></label></div>` : ""}<div class="console-tabs"><button type="button" data-command-tab="moves" class="${state.commandTab === "moves" ? "active" : ""}">技</button><button type="button" data-command-tab="switches" class="${state.commandTab === "switches" ? "active" : ""}">交代</button></div><div class="${state.commandTab === "moves" ? "move-grid" : "switch-list"}">${state.commandTab === "moves" ? moveButtons : switchButtons || "<p>交代できるポケモンがいません。</p>"}</div>`;
+    elements.commandPanel.innerHTML = `<div class="command-title"><span>${state.commandTab === "moves" ? "技を選ぶ" : "交代する"}</span><span>${escapeHtml(mine.team[mine.active].name)}</span></div><div class="console-tabs"><button type="button" data-command-tab="moves" class="${state.commandTab === "moves" ? "active" : ""}">技</button><button type="button" data-command-tab="switches" class="${state.commandTab === "switches" ? "active" : ""}">交代</button></div><div class="${state.commandTab === "moves" ? "move-grid" : "switch-list"}">${state.commandTab === "moves" ? moveButtons : switchButtons() || "<p>交代できるポケモンがいません。</p>"}</div>`;
     bindCommandButtons();
   }
 
   function bindCommandButtons() {
     elements.commandPanel.querySelectorAll("[data-command-tab]").forEach((button) => button.addEventListener("click", () => {
+      state.pendingSwitchMoveId = null;
       state.commandTab = button.dataset.commandTab;
       renderBattle();
     }));
     elements.commandPanel.querySelectorAll("[data-action-move]").forEach((button) => button.addEventListener("click", () => {
-      const preference = elements.commandPanel.querySelector("#switchPreference")?.value;
-      submitBattleAction({ type: "move", moveId: button.dataset.actionMove, switchTo: preference, switchPreference: preference });
+      const legal = ENGINE.legalActions(state.room.battle, state.playerKey);
+      const slot = legal.moves.find((move) => move.id === button.dataset.actionMove);
+      if (slot?.requiresSwitchTarget && legal.switches.length) {
+        state.pendingSwitchMoveId = slot.id;
+        renderBattle();
+        return;
+      }
+      submitBattleAction({ type: "move", moveId: button.dataset.actionMove });
+    }));
+    elements.commandPanel.querySelectorAll("[data-action-pivot-switch]").forEach((button) => button.addEventListener("click", () => {
+      const to = Number(button.dataset.actionPivotSwitch);
+      submitBattleAction({ type: "move", moveId: state.pendingSwitchMoveId, switchTo: to, switchPreference: to });
+    }));
+    elements.commandPanel.querySelectorAll("[data-cancel-pivot]").forEach((button) => button.addEventListener("click", () => {
+      state.pendingSwitchMoveId = null;
+      renderBattle();
     }));
     elements.commandPanel.querySelectorAll("[data-action-switch]").forEach((button) => button.addEventListener("click", () => submitBattleAction({ type: "switch", to: Number(button.dataset.actionSwitch) })));
   }
@@ -616,6 +773,7 @@
 
   async function submitBattleAction(action) {
     if (state.actionPending) return;
+    state.pendingSwitchMoveId = null;
     state.actionPending = true;
     renderBattle();
     try {
@@ -683,7 +841,11 @@
       state.roomNumber = null;
       state.selection = [];
       state.actionPending = false;
+      state.pendingSwitchMoveId = null;
+      state.roomDisconnected = false;
+      state.pendingReconnect = null;
       localStorage.removeItem(STORAGE.room);
+      closeReconnectPrompt();
       setConnection(state.localMode ? `${state.playerName}・ローカル` : `${state.playerName}・オンライン`, state.localMode ? "waiting" : "online");
       renderRooms();
       showScreen("rooms");
@@ -715,6 +877,9 @@
     elements.leaveBattleButton.addEventListener("click", async () => { if (window.confirm("対戦を終了して部屋を出ますか？")) await leaveRoom(); });
     elements.rematchButton.addEventListener("click", requestRematch);
     elements.leaveResultButton.addEventListener("click", leaveRoom);
+    elements.reconnectButton.addEventListener("click", reconnectToRoom);
+    elements.discardReconnectButton.addEventListener("click", discardReconnect);
+    elements.reconnectDialog.addEventListener("cancel", (event) => event.preventDefault());
     elements.homeButton.addEventListener("click", async () => {
       if (state.room && !window.confirm("現在の部屋から退出しますか？")) return;
       if (state.room) await leaveRoom();

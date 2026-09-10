@@ -6,10 +6,16 @@
       "$playerKey": {
         ".read": "auth != null && $playerKey.matches(/^p_[A-Za-z0-9_-]+$/)",
         ".write": "auth != null && $playerKey.matches(/^p_[A-Za-z0-9_-]+$/)",
-        ".validate": "!newData.exists() || (newData.hasChildren(['schemaVersion', 'playerKey', 'playerName', 'party', 'updatedAt', 'updatedByUid']) && newData.child('schemaVersion').val() == 1 && newData.child('playerKey').val() == $playerKey && newData.child('playerName').isString() && newData.child('playerName').val().length > 0 && newData.child('playerName').val().length <= 20 && newData.child('party').numChildren() == 6 && newData.child('updatedAt').isNumber() && newData.child('updatedByUid').val() == auth.uid)",
+        ".validate": "!newData.exists() || (newData.hasChildren(['schemaVersion', 'playerKey', 'playerName', 'party', 'updatedAt', 'updatedByUid']) && (newData.child('schemaVersion').val() == 1 || newData.child('schemaVersion').val() == 2) && newData.child('playerKey').val() == $playerKey && newData.child('playerName').isString() && newData.child('playerName').val().length > 0 && newData.child('playerName').val().length <= 20 && newData.child('party').numChildren() == 6 && newData.child('updatedAt').isNumber() && newData.child('updatedByUid').val() == auth.uid)",
         "party": {
           "$index": {
-            ".validate": "$index.matches(/^[0-5]$/) && newData.hasChildren(['speciesId', 'level', 'natureId', 'abilityId', 'moveIds', 'evs', 'ivs']) && newData.child('speciesId').isString() && newData.child('level').isNumber() && newData.child('moveIds').numChildren() >= 1 && newData.child('moveIds').numChildren() <= 4 && newData.child('evs').numChildren() == 6 && newData.child('ivs').numChildren() == 6"
+            ".validate": "$index.matches(/^[0-5]$/) && newData.hasChildren(['speciesId', 'level', 'natureId', 'abilityId', 'moveIds', 'ivs']) && (newData.child('effortPoints').numChildren() == 6 || newData.child('evs').numChildren() == 6) && newData.child('speciesId').isString() && newData.child('level').isNumber() && newData.child('moveIds').numChildren() >= 1 && newData.child('moveIds').numChildren() <= 4 && newData.child('ivs').numChildren() == 6",
+            "effortPoints": {
+              ".validate": "!newData.exists() || (newData.hasChildren(['hp', 'attack', 'defense', 'specialAttack', 'specialDefense', 'speed']) && newData.numChildren() == 6 && newData.child('hp').val() + newData.child('attack').val() + newData.child('defense').val() + newData.child('specialAttack').val() + newData.child('specialDefense').val() + newData.child('speed').val() <= 66)",
+              "$stat": {
+                ".validate": "$stat.matches(/^(hp|attack|defense|specialAttack|specialDefense|speed)$/) && newData.isNumber() && newData.val() >= 0 && newData.val() <= 32"
+              }
+            }
           }
         }
       }
@@ -17,7 +23,7 @@
     "rooms": {
       "$room": {
         ".read": "auth != null && $room.matches(/^[1-5]$/)",
-        ".write": "auth != null && $room.matches(/^[1-5]$/) && (!data.exists() || data.child('members').child(auth.uid).val() == true || (data.child('members').numChildren() < 2 && newData.child('members').child(auth.uid).val() == true))",
+        ".write": "auth != null && $room.matches(/^[1-5]$/) && (!data.exists() || data.child('members').child(auth.uid).val() == true || (newData.exists() && newData.child('members').child(auth.uid).val() == true && newData.child('members').numChildren() <= 2))",
         ".validate": "!newData.exists() || (newData.hasChildren(['version', 'roomNumber', 'phase', 'players', 'members']) && newData.child('roomNumber').val() >= 1 && newData.child('roomNumber').val() <= 5 && newData.child('players').numChildren() <= 2 && newData.child('members').numChildren() <= 2)"
       }
     }

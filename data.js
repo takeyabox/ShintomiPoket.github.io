@@ -482,6 +482,18 @@
       generation: 8, target: "allOpponents", contact: true, effect: { kind: "damageAndStage", target: "target", stat: "attack", stages: -1, chance: 1 },
       description: "相手全体を攻撃し、攻撃を1段階下げる。",
     }),
+    move("roar", "ほえる", "normal", "status", null, null, 20, {
+      priority: -6, target: "oneOpponent", sound: true, effect: { kind: "forceRandomSwitch", target: "opponent" },
+      description: "相手を控えのポケモンからランダムに選ばれた1体と交代させる。",
+    }),
+    move("whirlwind", "ふきとばし", "normal", "status", null, null, 20, {
+      priority: -6, target: "oneOpponent", effect: { kind: "forceRandomSwitch", target: "opponent" },
+      description: "相手を控えのポケモンからランダムに選ばれた1体と交代させる。",
+    }),
+    move("dragon-tail", "ドラゴンテール", "dragon", "physical", 60, 90, 10, {
+      generation: 5, priority: -6, contact: true, effect: { kind: "damageAndForceRandomSwitch", target: "opponent" },
+      description: "攻撃後、相手を控えのポケモンからランダムに選ばれた1体と交代させる。",
+    }),
   ];
 
   const MOVES = indexBy(MOVE_LIST, "id");
@@ -830,6 +842,8 @@
     defaultIv: 31,
     maxEvPerStat: 252,
     maxTotalEv: 510,
+    maxEffortPointsPerStat: 32,
+    maxTotalEffortPoints: 66,
     speciesClause: true,
     itemClause: true,
     maxStatStage: 6,
@@ -837,7 +851,7 @@
   });
 
   const GAME_DATA = deepFreeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     battleRuleset: "scarlet-violet",
     source: {
       pokemon: "docs/pokemon_data.csv",

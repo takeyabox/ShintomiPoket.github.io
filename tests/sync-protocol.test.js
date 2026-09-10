@@ -6,10 +6,48 @@ const engine = require("../battle-engine.js");
 const {
   FirebaseBattleRoom,
   applyBattleAction,
+  applyTeamSelection,
   configFingerprint,
+  normaliseRoomState,
   playerKeyFromName,
+  removePlayerFromRoom,
   validConfig,
 } = require("../firebase-sync.js");
+
+function firebaseRoundTrip(value) {
+  function prune(current) {
+    if (current === null || current === undefined) return undefined;
+    if (Array.isArray(current)) {
+      const result = current.map((entry) => prune(entry));
+      return result.some((entry) => entry !== undefined)
+        ? result.map((entry) => entry === undefined ? null : entry)
+        : undefined;
+    }
+    if (typeof current !== "object") return current;
+    const entries = Object.entries(current)
+      .map(([key, entry]) => [key, prune(entry)])
+      .filter(([, entry]) => entry !== undefined);
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  }
+  return structuredClone(prune(value));
+}
+
+function previewRoomState() {
+  const party = engine.createDefaultParty();
+  return {
+    version: 1,
+    roomNumber: 1,
+    phase: "teamPreview",
+    seed: 808,
+    revision: 1,
+    commands: {},
+    members: { uidOne: true, uidTwo: true },
+    players: {
+      one: { id: "one", name: "ONE", ownerUid: "uidOne", joinedAt: 1, party, publicTeam: engine.publicTeam(party) },
+      two: { id: "two", name: "TWO", ownerUid: "uidTwo", joinedAt: 2, party: engine.clone(party), publicTeam: engine.publicTeam(party) },
+    },
+  };
+}
 
 function roomState() {
   const party = engine.createDefaultParty();
@@ -69,6 +107,44 @@ test("the same device cannot overwrite a submitted turn command", () => {
   assert.throws(() => applyBattleAction(room, "one", { type: "move", moveId: "muddy-water" }), /送信済み/);
 });
 
+test("two Firebase-shaped selections start a battle and restore stripped engine fields", () => {
+  const room = previewRoomState();
+  applyTeamSelection(room, "one", [0, 2, 4]);
+  const afterFirstDevice = firebaseRoundTrip(room);
+  // RTDB may expose indexed values as a numeric-key object rather than Array.
+  afterFirstDevice.players.one.selection = { 0: 0, 1: 2, 2: 4 };
+  const secondDevice = normaliseRoomState(afterFirstDevice);
+  applyTeamSelection(secondDevice, "two", { 0: 1, 1: 3, 2: 5 });
+  assert.equal(secondDevice.phase, "battle");
+  assert.equal(secondDevice.battle.players[0].team.length, 3);
+  assert.equal(secondDevice.battle.players[1].team.length, 3);
+
+  const storedBattle = firebaseRoundTrip(secondDevice);
+  assert.equal(storedBattle.battle.players[0].team[0].volatile, undefined);
+  assert.equal(storedBattle.battle.requiredSwitches, undefined);
+  const restored = normaliseRoomState(storedBattle);
+  assert.deepEqual(restored.battle.players[0].team[0].volatile, {});
+  assert.deepEqual(restored.battle.requiredSwitches, []);
+  assert.doesNotThrow(() => engine.legalActions(restored.battle, "one"));
+  const firstMove = engine.legalActions(restored.battle, "one").moves.find((move) => !move.disabled).id;
+  const secondMove = engine.legalActions(restored.battle, "two").moves.find((move) => !move.disabled).id;
+  applyBattleAction(restored, "one", { type: "move", moveId: firstMove });
+  applyBattleAction(restored, "two", { type: "move", moveId: secondMove });
+  assert.equal(restored.battle.turn, 2);
+});
+
+test("declining reconnection removes the player and resets the opponent room", () => {
+  const room = previewRoomState();
+  applyTeamSelection(room, "one", [0, 1, 2]);
+  applyTeamSelection(room, "two", [3, 4, 5]);
+  const remaining = removePlayerFromRoom(room, "one");
+  assert.equal(remaining.phase, "waiting");
+  assert.equal(remaining.battle, undefined);
+  assert.deepEqual(Object.keys(remaining.players), ["two"]);
+  assert.deepEqual(Object.keys(remaining.members), ["uidTwo"]);
+  assert.equal(remaining.players.two.selection, undefined);
+});
+
 function profileClient(initialProfile = null) {
   let stored = initialProfile;
   const client = new FirebaseBattleRoom({});
@@ -115,6 +191,20 @@ test("a second device can load a profile by using the same player name", async (
   second.client.user = { uid: "another-anonymous-device" };
   const loaded = await second.client.loadPlayerParty();
   assert.equal(loaded.party[0].natureId, "adamant");
+});
+
+test("legacy cloud parties are migrated when loaded", async () => {
+  const party = engine.createDefaultParty();
+  party.forEach((build) => {
+    delete build.effortPoints;
+    build.evs = { hp: 252, attack: 0, defense: 0, specialAttack: 0, specialDefense: 0, speed: 0 };
+  });
+  const key = playerKeyFromName("竹重 颯真");
+  const legacy = profileClient({ schemaVersion: 1, playerKey: key, playerName: "竹重 颯真", party });
+  const loaded = await legacy.client.loadPlayerParty();
+  assert.equal(loaded.schemaVersion, 2);
+  assert.equal(loaded.party[0].effortPoints.hp, 32);
+  assert.equal("evs" in loaded.party[0], false);
 });
 
 test("missing or invalid cloud profiles are handled safely", async () => {

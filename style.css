@@ -316,9 +316,8 @@ button.preview-mon { width: 100%; }
 .console-tabs { display: flex; gap: 5px; margin: 12px 0 8px; }
 .console-tabs button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); background: transparent; font-size: 10px; }
 .console-tabs button.active { color: var(--ink); background: var(--paper); }
-.pivot-select { margin-bottom: 9px; }
-.pivot-select label { display: flex; align-items: center; gap: 8px; }
-.pivot-select select { min-height: 34px; padding: 5px 8px; font-size: 11px; }
+.switch-choice-title { align-items: center; }
+.switch-choice-title .text-button { margin-left: auto; }
 .waiting-command { display: grid; min-height: 230px; place-items: center; border: 1px dashed var(--line); border-radius: 16px; color: var(--muted); text-align: center; }
 .waiting-command strong { display: block; margin-bottom: 7px; color: var(--paper); }
 .battle-log { min-height: 180px; max-height: 330px; overflow: auto; padding: 16px; box-shadow: none; }
@@ -334,6 +333,18 @@ button.preview-mon { width: 100%; }
 .result-card > p:not(.eyebrow,.form-message) { color: var(--muted); }
 .result-actions { display: flex; gap: 10px; margin-top: 28px; }
 .result-actions > * { width: 50%; margin-top: 0; }
+
+.reconnect-dialog {
+  width: min(560px, calc(100% - 32px));
+  padding: clamp(28px, 5vw, 48px);
+  color: var(--paper);
+}
+.reconnect-dialog::backdrop { background: rgba(3, 8, 15, .78); backdrop-filter: blur(8px); }
+.reconnect-dialog h2 { margin: 0; font-size: clamp(28px, 5vw, 46px); letter-spacing: -.035em; }
+.reconnect-dialog > p:not(.eyebrow,.form-message) { color: #b8c0ca; line-height: 1.8; }
+.reconnect-room-state { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 13px; color: var(--accent-2); background: rgba(255,255,255,.035); font-size: 12px; font-weight: 800; }
+.reconnect-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 24px; }
+.reconnect-actions > * { width: 100%; margin: 0; }
 
 .toast { position: fixed; z-index: 100; right: 20px; bottom: 20px; max-width: min(390px, calc(100% - 40px)); padding: 13px 17px; transform: translateY(20px); border: 1px solid var(--line); border-radius: 12px; opacity: 0; pointer-events: none; background: #273649; box-shadow: var(--shadow); font-size: 12px; transition: .2s; }
 .toast.show { transform: none; opacity: 1; }
@@ -391,6 +402,7 @@ button.preview-mon { width: 100%; }
   .command-panel, .battle-log { margin-bottom: 12px; }
   .result-actions { flex-direction: column; }
   .result-actions > * { width: 100%; }
+  .reconnect-actions { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
